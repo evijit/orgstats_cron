@@ -12,7 +12,7 @@ env:
 jobs:
   update-data:
     runs-on: ubuntu-latest
-    timeout-minutes: 90  # Increased timeout for better reliability
+    timeout-minutes: 90
     strategy:
       fail-fast: false
 
@@ -30,90 +30,24 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Log system resources and environment
+    # --- NEW, FAST TESTING STEP ---
+    # This step runs the entire pipeline logic on a small subset of data.
+    # It provides fast feedback and validation before the main job.
+    - name: Test pipeline logic on a small data subset
+      env:
+        TEST_DATA_LIMIT: 5000 # Fetch only 5000 rows for the test
       run: |
-        echo "=== System Information ==="
-        echo "Timestamp: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-        echo "CPU cores: $(nproc)"
-        echo "Memory total: $(free -h | grep 'Mem:' | awk '{print $2}')"
-        echo "Memory available: $(free -h | grep 'Mem:' | awk '{print $7}')"
-        echo "Disk space: $(df -h / | tail -1 | awk '{print $4}')"
-        echo "Python version: $(python --version)"
-        echo ""
-        echo "=== Module Verification ==="
-        python - <<EOF
-        import sys
-        modules_to_test = ['config', 'utils', 'data_fetcher', 'tag_processor', 'data_processor']
-        all_passed = True
-        for module in modules_to_test:
-            try:
-                __import__(module)
-                print(f"✅ {module}.py imported successfully")
-            except ImportError as e:
-                print(f"❌ {module}.py import failed: {e}")
-                all_passed = False
-        if not all_passed:
-            sys.exit(1)
-        EOF
-        echo "=========================="
+        echo "🧪 Running fast integration test on a small subset of data..."
+        python test_pipeline.py
+        echo "✅ Pipeline logic test passed!"
 
-    - name: Test individual modules
-      id: module_tests
-      run: |
-        echo "=== Testing Individual Modules ==="
-
-        # --- FIX: Increased timeout and added specific error handling ---
-        echo "🧪 Testing data_fetcher module..."
-        # Increased timeout to 15 minutes (900s) for network robustness.
-        # The timeout command exits with 124 when it kills the process.
-        timeout 900s python - <<EOF > data_fetcher_test.log 2>&1
-        from data_fetcher import fetch_raw_data, validate_raw_data
-        from utils import log_progress
-        import sys
-        try:
-            log_progress('Testing data fetcher...')
-            df_raw, timestamp = fetch_raw_data()
-            validate_raw_data(df_raw)
-            log_progress(f'✅ Data fetcher test passed - {len(df_raw):,} rows')
-        except Exception as e:
-            log_progress(f'❌ Data fetcher test failed in Python: {e}')
-            import traceback
-            traceback.print_exc()
-            sys.exit(1)
-        EOF
-
-        exit_code=$?
-        echo "--- Log from data_fetcher test ---"
-        cat data_fetcher_test.log
-        echo "------------------------------------"
-
-        if [ $exit_code -ne 0 ]; then
-            if [ $exit_code -eq 124 ]; then
-                echo "❌ FATAL: Data fetcher test FAILED due to TIMEOUT (exceeded 15 minutes)."
-            else
-                echo "❌ FATAL: Data fetcher test FAILED with exit code $exit_code. See log above for Python errors."
-            fi
-            exit 1
-        else
-            echo "✅ Data fetcher test PASSED."
-        fi
-        # --- END OF FIX ---
-
-        echo ""
-        echo "🧪 Testing tag_processor module..."
-        python tag_processor.py || exit 1
-
-        echo ""
-        echo "🧪 Testing data_processor module..."
-        python data_processor.py || exit 1
-
-        echo "=== Module Testing Complete ==="
-
-    - name: Run main processing pipeline
+    # --- MAIN PROCESSING STEP ---
+    # This step runs on the full dataset only after the fast test passes.
+    - name: Run main processing pipeline (full dataset)
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
-        echo "=== Starting Main Data Processing Pipeline ==="
+        echo "=== Starting Main Data Processing Pipeline (Full Dataset) ==="
         echo "Start time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
 
         # Function to run the main pipeline with timeout and monitoring
@@ -122,45 +56,30 @@ jobs:
           echo ""
           echo "🔄 Pipeline Execution (Attempt $attempt)"
           echo "======================================"
-
-          # Run with timeout and capture output
+          # Run with timeout and capture output, returning the python script's exit code
           timeout 3600s python main.py 2>&1 | while IFS= read -r line; do
             echo "$(date -u '+%H:%M:%S'): $line"
           done
-
-          return ${PIPESTATUS[0]}  # Return the exit code of python, not timeout
+          return ${PIPESTATUS[0]}
         }
 
         # Execute pipeline with retry logic
         max_attempts=2
         attempt=1
-
         while [ $attempt -le $max_attempts ]; do
           echo "🚀 Starting pipeline attempt $attempt of $max_attempts"
-
           if run_main_pipeline $attempt; then
-            echo ""
             echo "✅ Pipeline completed successfully on attempt $attempt!"
             echo "Completion time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
             break
           else
             exit_code=$?
-            echo ""
             echo "❌ Pipeline failed on attempt $attempt (exit code: $exit_code)"
-
             if [ $attempt -eq $max_attempts ]; then
               echo "💥 All pipeline attempts exhausted"
               exit $exit_code
             else
               echo "⏳ Preparing for retry..."
-              echo "System resources before retry:"
-              free -h
-              df -h
-
-              # Cleanup any temporary files
-              rm -f models_processed.parquet.tmp *.tmp 2>/dev/null || true
-
-              echo "Waiting 60 seconds before retry..."
               sleep 60
               attempt=$((attempt + 1))
             fi
@@ -171,295 +90,118 @@ jobs:
       id: detailed_verification
       run: |
         echo "=== Detailed Output Verification ==="
-        echo "Verification time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
+        if [ ! -f "models_processed.parquet" ]; then
+          echo "❌ Output file missing"
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+        
+        file_size_mb=$(($(stat -c%s "models_processed.parquet") / 1024 / 1024))
+        echo "✅ Output file exists: models_processed.parquet (${file_size_mb} MB)"
 
-        if [ -f "models_processed.parquet" ]; then
-          file_size=$(stat -c%s "models_processed.parquet")
-          file_size_mb=$((file_size / 1024 / 1024))
+        if [ $file_size_mb -lt 2 ]; then
+          echo "❌ File size too small (${file_size_mb} MB)"
+          echo "has_changes=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
 
-          echo "✅ Output file exists"
-          echo "📁 File: models_processed.parquet"
-          echo "📊 Size: ${file_size} bytes (${file_size_mb} MB)"
-
-          if [ $file_size -gt 2097152 ]; then  # 2MB minimum
-            echo "✅ File size acceptable"
-
-            # Comprehensive validation using a heredoc
-            validation_result=$(python - <<EOF
-        import pandas as pd
-        import sys
-        from datetime import datetime
-
-        def log_with_timestamp(msg):
-            print(f"[{datetime.utcnow().strftime('%H:%M:%S')}] {msg}")
-
+        # Comprehensive validation script
+        validation_result=$(python - <<EOF
+        import pandas as pd, sys
         try:
-            log_with_timestamp('🔍 Loading and validating parquet file...')
+            print('--- Comprehensive Validation ---')
             df = pd.read_parquet('models_processed.parquet')
-
-            log_with_timestamp('✅ File loaded successfully')
-            log_with_timestamp(f'📊 Dataset shape: {df.shape[0]:,} rows × {df.shape[1]} columns')
-            log_with_timestamp(f'💾 Memory usage: {df.memory_usage(deep=True).sum() / (1024*1024):.1f} MB')
-
-            # Column verification
-            expected_critical_cols = ['id', 'downloads', 'likes', 'params', 'organization', 'has_robot', 'size_category']
-            missing_critical = [col for col in expected_critical_cols if col not in df.columns]
-
-            if missing_critical:
-                log_with_timestamp(f'❌ Missing critical columns: {missing_critical}')
-                sys.exit(1)
-            else:
-                log_with_timestamp('✅ All critical columns present')
-
-            # Data quality checks
-            log_with_timestamp('📈 Data Quality Summary:')
-
-            unique_ids = df['id'].nunique()
-            total_ids = len(df['id'].dropna())
-            log_with_timestamp(f'   🆔 Model IDs: {total_ids:,} total, {unique_ids:,} unique')
-
-            if 'has_robot' in df.columns:
-                robot_count = df['has_robot'].sum()
-                robot_pct = (robot_count / len(df)) * 100
-                log_with_timestamp(f'   🤖 Robotics models: {robot_count:,} ({robot_pct:.2f}%)')
-                if robot_count > 0:
-                    robot_models = df[df['has_robot']]['id'].head(3).tolist()
-                    log_with_timestamp(f'   🤖 Example robotics models: {robot_models}')
-
-            if 'organization' in df.columns:
-                org_count = df['organization'].nunique()
-                top_org = df['organization'].value_counts().index[0]
-                top_org_count = df['organization'].value_counts().iloc[0]
-                log_with_timestamp(f'   🏢 Organizations: {org_count:,} unique')
-                log_with_timestamp(f'   🏢 Top organization: {top_org} ({top_org_count:,} models)')
-
-            if 'size_category' in df.columns:
-                size_dist = df['size_category'].value_counts()
-                log_with_timestamp('   📏 Size distribution:')
-                for size_cat, count in size_dist.head(3).items():
-                    pct = (count / len(df)) * 100
-                    log_with_timestamp(f'      {size_cat}: {count:,} ({pct:.1f}%)')
-
-            if 'data_download_timestamp' in df.columns:
-                latest_timestamp = pd.to_datetime(df['data_download_timestamp']).max()
-                log_with_timestamp(f'   ⏰ Data timestamp: {latest_timestamp}')
-
+            print(f'📊 Shape: {df.shape}')
+            
+            expected_cols = ['id', 'downloads', 'likes', 'params', 'organization', 'has_robot', 'size_category']
+            missing = [col for col in expected_cols if col not in df.columns]
+            if missing:
+                raise AssertionError(f"Missing critical columns: {missing}")
+            print('✅ All critical columns present.')
+            
             if len(df) < 100000:
-                log_with_timestamp(f'⚠️  Dataset smaller than expected: {len(df):,} rows')
+                print(f"⚠️  Dataset smaller than expected: {len(df):,} rows")
             else:
-                log_with_timestamp('✅ Dataset size validation passed')
-
-            log_with_timestamp('🎉 Comprehensive validation completed successfully!')
-
+                print(f'✅ Dataset size acceptable: {len(df):,} rows.')
+            
+            print('🎉 Validation successful!')
         except Exception as e:
-            log_with_timestamp(f'❌ Validation failed: {str(e)}')
+            print(f'❌ Validation failed: {e}', file=sys.stderr)
             import traceback
             traceback.print_exc()
             sys.exit(1)
         EOF
-            )
+        )
 
-            validation_exit_code=$?
-            echo "${validation_result}"
-
-            if [ $validation_exit_code -eq 0 ]; then
-              echo "has_changes=true" >> $GITHUB_OUTPUT
-              echo "file_size_mb=${file_size_mb}" >> $GITHUB_OUTPUT
-            else
-              echo "❌ Data validation failed"
-              echo "has_changes=false" >> $GITHUB_OUTPUT
-              exit 1
-            fi
-          else
-            echo "❌ File size too small (${file_size_mb} MB)"
-            echo "has_changes=false" >> $GITHUB_OUTPUT
-            exit 1
-          fi
+        validation_exit_code=$?
+        echo "${validation_result}"
+        if [ $validation_exit_code -eq 0 ]; then
+          echo "has_changes=true" >> $GITHUB_OUTPUT
+          echo "file_size_mb=${file_size_mb}" >> $GITHUB_OUTPUT
         else
-          echo "❌ Output file missing"
           echo "has_changes=false" >> $GITHUB_OUTPUT
           exit 1
         fi
 
     - name: Upload to Hugging Face Space
       if: steps.detailed_verification.outputs.has_changes == 'true'
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
         echo "=== Uploading to Hugging Face Space ==="
-        echo "Upload start: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-
-        upload_with_retry() {
-          local attempt=$1
-          local max_attempts=$2
-
-          echo "📤 Upload attempt $attempt of $max_attempts"
-
-          python - <<EOF
+        python - <<EOF
         from huggingface_hub import HfApi
-        import os
-        from datetime import datetime
-        import sys
-        import time
-
-        def log_upload(msg):
-            print(f"[{datetime.utcnow().strftime('%H:%M:%S')}] {msg}")
-
-        try:
-            api = HfApi()
-            timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
-            file_path = 'models_processed.parquet'
-            file_size_mb = os.path.getsize(file_path) / (1024*1024)
-
-            log_upload(f'📤 Starting upload of {file_size_mb:.1f}MB file')
-            log_upload(f'🎯 Target: evijit/OrgStats space')
-            log_upload(f'⏰ Timestamp: {timestamp}')
-
-            start_time = time.time()
-
-            result = api.upload_file(
-                path_or_fileobj=file_path,
-                path_in_repo='models_processed.parquet',
-                repo_id='evijit/OrgStats',
-                repo_type='space',
-                token=os.environ['HF_TOKEN'],
-                commit_message=f'Automated data update - {timestamp}'
-            )
-
-            upload_time = time.time() - start_time
-            log_upload(f'✅ Upload completed successfully in {upload_time:.1f}s')
-            log_upload(f'🔗 Result: {result}')
-
-        except Exception as e:
-            log_upload(f'❌ Upload failed: {str(e)}')
-            import traceback
-            traceback.print_exc()
-            sys.exit(1)
+        import os, sys, time
+        
+        for attempt in range(3):
+            try:
+                print(f"📤 Upload attempt {attempt + 1}...")
+                api = HfApi()
+                api.upload_file(
+                    path_or_fileobj='models_processed.parquet',
+                    path_in_repo='models_processed.parquet',
+                    repo_id='evijit/OrgStats',
+                    repo_type='space',
+                    token=os.environ['HF_TOKEN'],
+                    commit_message=f'Automated data update - {time.strftime("%Y-%m-%d %H:%M:%S UTC")}'
+                )
+                print('✅ Upload successful!')
+                sys.exit(0)
+            except Exception as e:
+                print(f"❌ Upload attempt {attempt + 1} failed: {e}")
+                if attempt < 2:
+                    print("Retrying in 45 seconds...")
+                    time.sleep(45)
+                else:
+                    sys.exit(1)
         EOF
-          return $?
-        }
-
-        # Retry logic for upload
-        max_upload_attempts=3
-        upload_attempt=1
-
-        while [ $upload_attempt -le $max_upload_attempts ]; do
-          if upload_with_retry $upload_attempt $max_upload_attempts; then
-            echo "✅ Upload successful on attempt $upload_attempt"
-            echo "Upload completion: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-            break
-          else
-            exit_code=$?
-            echo "❌ Upload failed on attempt $upload_attempt"
-
-            if [ $upload_attempt -eq $max_upload_attempts ]; then
-              echo "💥 All upload attempts failed"
-              exit $exit_code
-            else
-              echo "⏳ Waiting 45 seconds before retry..."
-              sleep 45
-              upload_attempt=$((upload_attempt + 1))
-            fi
-          fi
-        done
 
     - name: Create workflow summary
       if: always()
       run: |
-        echo "=== Workflow Execution Summary ==="
-        echo "Summary generated: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-
-        # Check the job conclusion status
         if [[ "${{ job.status }}" == "success" ]]; then
-          file_size=$(stat -c%s "models_processed.parquet")
-          file_size_mb=$((file_size / 1024 / 1024))
-
           echo "### 🎉 SUCCESS: Data Processing Completed" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| 📊 Output File Size | ${file_size_mb} MB |" >> $GITHUB_STEP_SUMMARY
+          echo "| 📊 Output File Size | ${{ steps.detailed_verification.outputs.file_size_mb }} MB |" >> $GITHUB_STEP_SUMMARY
           echo "| ⏱️ Total Execution Time | $SECONDS seconds |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🕒 Completion Time | $(date -u '+%Y-%m-%d %H:%M:%S UTC') |" >> $GITHUB_STEP_SUMMARY
-
-          # Add data quality info from the parquet file
-          python - <<EOF >> $GITHUB_STEP_SUMMARY
-        import pandas as pd
-        try:
-            df = pd.read_parquet('models_processed.parquet')
-            print(f"| 🤖 Total Models | {len(df):,} |")
-            if 'has_robot' in df.columns:
-                robot_count = df['has_robot'].sum()
-                print(f"| 🦾 Robotics Models | {robot_count:,} |")
-            if 'organization' in df.columns:
-                org_count = df['organization'].nunique()
-                print(f"| 🏢 Organizations | {org_count:,} |")
-        except:
-            pass # Suppress errors if file is missing/corrupt
-        EOF
-
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "✅ **Data successfully uploaded to Hugging Face Space: evijit/OrgStats**" >> $GITHUB_STEP_SUMMARY
         else
           echo "### ❌ FAILURE: Data Processing Failed" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
           echo "The data processing pipeline did not complete successfully." >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
           echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
           echo "| ⏱️ Failed After | $SECONDS seconds |" >> $GITHUB_STEP_SUMMARY
-          echo "| 🕒 Failure Time | $(date -u '+%Y-%m-%d %H:%M:%S UTC') |" >> $GITHUB_STEP_SUMMARY
         fi
-
         echo "" >> $GITHUB_STEP_SUMMARY
-        echo "---" >> $GITHUB_STEP_SUMMARY
-        echo "*Automated workflow run [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*" >> $GITHUB_STEP_SUMMARY
+        echo "*Run [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*" >> $GITHUB_STEP_SUMMARY
 
     - name: Upload build artifacts
       if: always()
       uses: actions/upload-artifact@v4
       with:
         name: pipeline-outputs-${{ github.run_number }}
-        path: |
-          models_processed.parquet
-          *.log
+        path: models_processed.parquet
         retention-days: 7
         if-no-files-found: warn
-
-    - name: System cleanup and final status
-      if: always()
-      run: |
-        echo "=== Final System Status ==="
-        echo "Cleanup time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-
-        # Show final resource usage
-        echo "📊 Final Resource Usage:"
-        echo "   Memory: $(free -h | grep 'Mem:' | awk '{print $3 "/" $2}')"
-        echo "   Disk: $(df -h / | tail -1 | awk '{print $3 "/" $2}')"
-
-        # List output files
-        echo ""
-        echo "📁 Generated Files:"
-        ls -lah *.parquet 2>/dev/null || echo "   No parquet files found"
-        ls -lah *.log 2>/dev/null || echo "   No log files found"
-
-        # Cleanup temporary files
-        echo ""
-        echo "🧹 Cleaning up temporary files..."
-        rm -f *.tmp 2>/dev/null || true
-        rm -f data_meta.txt 2>/dev/null || true
-
-        # Final status based on job status
-        echo ""
-        if [[ "${{ job.status }}" == "success" ]]; then
-          file_size_mb=$(( $(stat -c%s "models_processed.parquet") / 1024 / 1024 ))
-          echo "🎉 WORKFLOW COMPLETED SUCCESSFULLY!"
-          echo "   ✅ Output file: models_processed.parquet (${file_size_mb} MB)"
-          echo "   ✅ Total time: $SECONDS seconds"
-          echo "   ✅ Status: Data uploaded to HuggingFace Space"
-        else
-          echo "❌ WORKFLOW FAILED!"
-          echo "   ❌ Check job logs for error details"
-          echo "   ❌ Total time: $SECONDS seconds"
-        fi
-
-        echo ""
-        echo "=== End of Workflow ==="

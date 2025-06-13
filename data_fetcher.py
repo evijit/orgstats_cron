@@ -4,19 +4,33 @@
 import pandas as pd
 import duckdb
 import time
+import os  # <-- ADD THIS IMPORT
 from utils import log_progress, log_memory_usage
 from config import HF_PARQUET_URL
 
 def fetch_raw_data():
-    """Fetch raw data from Hugging Face dataset."""
+    """
+    Fetch raw data from Hugging Face dataset.
+    If 'TEST_DATA_LIMIT' env var is set, it will fetch only that many rows.
+    """
     log_progress("🚀 Starting data fetch from Hugging Face")
     log_progress(f"Source URL: {HF_PARQUET_URL}")
     
     fetch_start_time = time.time()
     
     try:
-        log_progress("⏳ Executing DuckDB query to fetch data...")
+        # --- MODIFICATION START ---
+        # Base query
         query = f"SELECT * FROM read_parquet('{HF_PARQUET_URL}')"
+
+        # Check for test mode limit
+        limit = os.environ.get('TEST_DATA_LIMIT')
+        if limit and limit.isdigit():
+            query += f" LIMIT {int(limit)}"
+            log_progress(f"🧪 Applying test limit: Fetching only {limit} rows.")
+        # --- MODIFICATION END ---
+            
+        log_progress("⏳ Executing DuckDB query to fetch data...")
         df_raw = duckdb.sql(query).df()
         data_download_timestamp = pd.Timestamp.now(tz='UTC')
         
@@ -34,17 +48,7 @@ def fetch_raw_data():
         log_progress(f"📊 Data statistics:")
         log_progress(f"   - Rows: {len(df_raw):,}")
         log_progress(f"   - Columns: {len(df_raw.columns)}")
-        log_progress(f"   - Column names: {list(df_raw.columns)}")
         log_progress(f"   - Download timestamp: {data_download_timestamp.strftime('%Y-%m-%d %H:%M:%S %Z')}")
-        
-        # Check for null values in key columns
-        key_columns = ['id', 'downloads', 'likes']
-        for col in key_columns:
-            if col in df_raw.columns:
-                null_count = df_raw[col].isnull().sum()
-                total_count = len(df_raw)
-                null_pct = (null_count / total_count) * 100
-                log_progress(f"   - {col}: {null_count:,} nulls ({null_pct:.1f}%)")
         
         log_memory_usage()
         
@@ -73,9 +77,9 @@ def validate_raw_data(df_raw):
     
     # Check data types
     log_progress("   - Data types:")
-    for col in df_raw.columns:
-        dtype = df_raw[col].dtype
-        log_progress(f"     {col}: {dtype}")
+    brief_dtypes = df_raw.dtypes.value_counts()
+    for dtype, count in brief_dtypes.items():
+        log_progress(f"     {str(dtype)}: {count} columns")
     
     validation_time = time.time() - validation_start
     log_progress(f"✅ Data validation completed in {validation_time:.2f}s")
@@ -83,11 +87,13 @@ def validate_raw_data(df_raw):
     return True
 
 if __name__ == "__main__":
-    # Test the data fetcher
+    # This block now runs on the full dataset if run directly.
+    # For testing, use `test_pipeline.py`.
     try:
+        log_progress("Running data_fetcher.py directly (full dataset)...")
         df_raw, timestamp = fetch_raw_data()
         validate_raw_data(df_raw)
-        log_progress(f"✅ Data fetcher test successful - {len(df_raw):,} rows fetched")
+        log_progress(f"✅ Data fetcher direct run successful - {len(df_raw):,} rows fetched")
     except Exception as e:
-        log_progress(f"❌ Data fetcher test failed: {e}")
+        log_progress(f"❌ Data fetcher direct run failed: {e}")
         raise
