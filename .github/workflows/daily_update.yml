@@ -39,14 +39,9 @@ jobs:
         echo "Memory available: $(free -h | grep 'Mem:' | awk '{print $7}')"
         echo "Disk space: $(df -h / | tail -1 | awk '{print $4}')"
         echo "Swap: $(free -h | grep 'Swap:' | awk '{print $2}')"
-        echo "Python memory check:"
-        python -c "
-import psutil
-available_gb = psutil.virtual_memory().available / (1024**3)
-process_mb = psutil.Process().memory_info().rss / (1024**2)
-print('Available memory: {:.1f} GB'.format(available_gb))
-print('Process memory: {:.1f} MB'.format(process_mb))
-"
+        echo "Python version: $(python --version)"
+        echo "Pip packages:"
+        pip list | grep -E "(pandas|psutil|duckdb)" || echo "Some packages not found"
         echo "=========================="
 
     - name: Run preprocessing with retries
