@@ -39,7 +39,6 @@ def process_lightweight_chunk(chunk_df):
             'downloadsAllTime': (float, 0.0), 
             'likes': (float, 0.0),
             'pipeline_tag': (str, ''),
-            'tags': (object, [])
         }
         
         for col, (dtype, default) in essential_mapping.items():
@@ -48,31 +47,31 @@ def process_lightweight_chunk(chunk_df):
                     result[col] = pd.to_numeric(chunk_df[col], errors='coerce').fillna(default)
                 elif dtype == str:
                     result[col] = chunk_df[col].astype(str).fillna(default)
-                elif col == 'tags':
-                    # Special handling for tags column to avoid fillna with list error
-                    def safe_tags_fill(x):
-                        try:
-                            # Handle various cases: None, NaN, empty lists, actual lists
-                            if x is None or (isinstance(x, float) and pd.isna(x)):
-                                return []
-                            elif isinstance(x, (list, tuple)):
-                                return list(x) if x else []
-                            else:
-                                return []
-                        except:
-                            return []
-                    result[col] = chunk_df[col].apply(safe_tags_fill)
                 else:
                     result[col] = chunk_df[col].fillna(default)
             else:
-                if col == 'tags':
-                    result[col] = [[] for _ in range(len(chunk_df))]
-                elif dtype == float:
-                    result[col] = default
+                if dtype == float:
+                    result[col] = default  
                 elif dtype == str:
                     result[col] = default
                 else:
-                    result[col] = [default] * len(chunk_df)  # Create series with default values
+                    result[col] = [default] * len(chunk_df)
+        
+        # Handle tags separately to avoid parquet issues - convert to string representation
+        if 'tags' in chunk_df.columns:
+            def safe_tags_to_string(x):
+                try:
+                    if x is None or (isinstance(x, float) and pd.isna(x)):
+                        return "[]"
+                    elif isinstance(x, (list, tuple)):
+                        return str(list(x)) if x else "[]"
+                    else:
+                        return "[]"
+                except:
+                    return "[]"
+            result['tags'] = chunk_df['tags'].apply(safe_tags_to_string)
+        else:
+            result['tags'] = "[]"
         
         # Handle file size - simplified version
         if 'params' in chunk_df.columns and pd.api.types.is_numeric_dtype(chunk_df['params']):
@@ -166,8 +165,42 @@ def main():
         del processed_chunks
         gc.collect()
         
+        # Clean up the tags column to ensure consistent data types
+        print("🧹 Cleaning up data types...")
+        df_final['tags'] = df_final['tags'].apply(lambda x: list(x) if isinstance(x, (list, tuple)) else [])
+        
+        # Ensure all columns have consistent types
+        for col in df_final.columns:
+            if df_final[col].dtype == 'object' and col != 'tags':
+                df_final[col] = df_final[col].astype(str)
+        
         print(f"💾 Saving {len(df_final):,} rows to {PROCESSED_PARQUET_FILE_PATH}")
-        df_final.to_parquet(PROCESSED_PARQUET_FILE_PATH, index=False, compression='snappy')
+        
+        # Use a more robust parquet writing approach
+        try:
+            df_final.to_parquet(
+                PROCESSED_PARQUET_FILE_PATH, 
+                index=False, 
+                compression='snappy',
+                engine='pyarrow'
+            )
+        except Exception as e:
+            print(f"⚠️ PyArrow failed ({e}), trying with fastparquet...")
+            try:
+                df_final.to_parquet(
+                    PROCESSED_PARQUET_FILE_PATH, 
+                    index=False, 
+                    compression='snappy',
+                    engine='fastparquet'
+                )
+            except Exception as e2:
+                print(f"⚠️ FastParquet also failed ({e2}), saving as CSV backup...")
+                df_final.to_csv(PROCESSED_PARQUET_FILE_PATH.replace('.parquet', '.csv'), index=False)
+                # Try one more time with simplified parquet
+                df_final_simple = df_final.copy()
+                df_final_simple['tags'] = df_final_simple['tags'].astype(str)  # Convert to string
+                df_final_simple.to_parquet(PROCESSED_PARQUET_FILE_PATH, index=False, compression='snappy')
+                print("💾 Saved with tags as strings")
         
         file_size = os.path.getsize(PROCESSED_PARQUET_FILE_PATH) / (1024 * 1024)
         total_time = time.time() - start_time
