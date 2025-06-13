@@ -30,7 +30,7 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Log system resources
+    - name: Log system resources (Initial)
       run: |
         echo "=== System Information ==="
         echo "CPU cores: $(nproc)"
@@ -43,126 +43,271 @@ jobs:
         pip list | grep -E "(pandas|psutil|duckdb)" || echo "Some packages not found"
         echo "=========================="
 
-    - name: Run preprocessing with retries
+    - name: Clean up previous runs
+      run: |
+        echo "🧹 Cleaning up any previous temporary files..."
+        rm -f models_processed.parquet.tmp 2>/dev/null || true
+        rm -f *.tmp 2>/dev/null || true
+        rm -f models_processed.parquet 2>/dev/null || true
+        echo "✅ Cleanup completed"
+
+    - name: Run preprocessing (Attempt 1)
+      id: preprocess_1
+      continue-on-error: true
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
-        echo "Starting data preprocessing with retry logic..."
-        run_preprocessing() {
-          local attempt=$1
-          echo "=== Preprocessing Attempt $attempt ==="
-          timeout 2400s python preprocess.py
-          return $?
-        }
-        max_attempts=3
-        attempt=1
-        while [ $attempt -le $max_attempts ]; do
-          echo "🔄 Running preprocessing (attempt $attempt/$max_attempts)"
-          if run_preprocessing $attempt; then
-            echo "✅ Preprocessing completed successfully on attempt $attempt"
-            break
-          else
-            exit_code=$?
-            echo "❌ Preprocessing failed on attempt $attempt (exit code: $exit_code)"
-            if [ $attempt -eq $max_attempts ]; then
-              echo "💥 All preprocessing attempts failed"
-              exit $exit_code
-            else
-              echo "⏳ Waiting 60 seconds before retry..."
-              sleep 60
-              rm -f models_processed.parquet.tmp 2>/dev/null || true
-              rm -f *.tmp 2>/dev/null || true
-              echo "System state before retry:"
-              free -h
-              df -h
-              attempt=$((attempt + 1))
-            fi
-          fi
-        done
+        echo "🔄 Starting preprocessing attempt 1/3..."
+        echo "=== Memory before processing ==="
+        free -h
+        echo "=== Disk space before processing ==="
+        df -h
+        echo "=== Starting preprocessing ==="
+        timeout 2400s python preprocess.py
+        echo "✅ Preprocessing attempt 1 completed successfully"
 
-    - name: Verify and validate output
-      id: check_output
+    - name: Check preprocessing result (Attempt 1)
+      id: check_1
+      if: steps.preprocess_1.outcome == 'success'
       run: |
-        echo "=== Output Verification ==="
+        if [ -f "models_processed.parquet" ]; then
+          file_size=$(stat -c%s "models_processed.parquet")
+          echo "✅ Preprocessing successful on attempt 1"
+          echo "📊 Output file size: ${file_size} bytes"
+          echo "success=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Preprocessing failed - no output file"
+          echo "success=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Log system state after attempt 1
+      if: steps.preprocess_1.outcome == 'failure'
+      run: |
+        echo "=== System state after failed attempt 1 ==="
+        echo "Memory usage:"
+        free -h
+        echo "Disk usage:"
+        df -h
+        echo "Process list:"
+        ps aux | head -10
+        echo "Cleaning up before retry..."
+        rm -f models_processed.parquet.tmp 2>/dev/null || true
+        rm -f *.tmp 2>/dev/null || true
+
+    - name: Wait before retry (Attempt 1 failed)
+      if: steps.preprocess_1.outcome == 'failure'
+      run: |
+        echo "⏳ Waiting 60 seconds before attempt 2..."
+        sleep 60
+
+    - name: Run preprocessing (Attempt 2)
+      id: preprocess_2
+      if: steps.preprocess_1.outcome == 'failure'
+      continue-on-error: true
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: |
+        echo "🔄 Starting preprocessing attempt 2/3..."
+        echo "=== Memory before processing ==="
+        free -h
+        echo "=== Disk space before processing ==="
+        df -h
+        echo "=== Starting preprocessing ==="
+        timeout 2400s python preprocess.py
+        echo "✅ Preprocessing attempt 2 completed successfully"
+
+    - name: Check preprocessing result (Attempt 2)
+      id: check_2
+      if: steps.preprocess_2.outcome == 'success'
+      run: |
+        if [ -f "models_processed.parquet" ]; then
+          file_size=$(stat -c%s "models_processed.parquet")
+          echo "✅ Preprocessing successful on attempt 2"
+          echo "📊 Output file size: ${file_size} bytes"
+          echo "success=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ Preprocessing failed - no output file"
+          echo "success=false" >> $GITHUB_OUTPUT
+        fi
+
+    - name: Log system state after attempt 2
+      if: steps.preprocess_2.outcome == 'failure'
+      run: |
+        echo "=== System state after failed attempt 2 ==="
+        echo "Memory usage:"
+        free -h
+        echo "Disk usage:"
+        df -h
+        echo "Process list:"
+        ps aux | head -10
+        echo "Cleaning up before final retry..."
+        rm -f models_processed.parquet.tmp 2>/dev/null || true
+        rm -f *.tmp 2>/dev/null || true
+
+    - name: Wait before final retry (Attempt 2 failed)
+      if: steps.preprocess_2.outcome == 'failure'
+      run: |
+        echo "⏳ Waiting 60 seconds before final attempt..."
+        sleep 60
+
+    - name: Run preprocessing (Attempt 3 - Final)
+      id: preprocess_3
+      if: steps.preprocess_1.outcome == 'failure' && steps.preprocess_2.outcome == 'failure'
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: |
+        echo "🔄 Starting preprocessing attempt 3/3 (FINAL)..."
+        echo "=== Memory before processing ==="
+        free -h
+        echo "=== Disk space before processing ==="
+        df -h
+        echo "=== Starting preprocessing ==="
+        timeout 2400s python preprocess.py
+        echo "✅ Preprocessing attempt 3 completed successfully"
+
+    - name: Check preprocessing result (Final)
+      id: check_final
+      if: steps.preprocess_3.outcome == 'success'
+      run: |
+        if [ -f "models_processed.parquet" ]; then
+          file_size=$(stat -c%s "models_processed.parquet")
+          echo "✅ Preprocessing successful on final attempt"
+          echo "📊 Output file size: ${file_size} bytes"
+          echo "success=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ All preprocessing attempts failed - no output file"
+          echo "success=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+    - name: Determine overall preprocessing success
+      id: preprocessing_status
+      run: |
+        if [[ "${{ steps.check_1.outputs.success }}" == "true" ]] || \
+           [[ "${{ steps.check_2.outputs.success }}" == "true" ]] || \
+           [[ "${{ steps.check_final.outputs.success }}" == "true" ]]; then
+          echo "✅ Preprocessing completed successfully"
+          echo "success=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ All preprocessing attempts failed"
+          echo "success=false" >> $GITHUB_OUTPUT
+          exit 1
+        fi
+
+    - name: Detailed file validation
+      id: validate_output
+      if: steps.preprocessing_status.outputs.success == 'true'
+      run: |
+        echo "=== Detailed Output Validation ==="
         if [ -f "models_processed.parquet" ]; then
           file_size=$(stat -c%s "models_processed.parquet")
           file_size_mb=$((file_size / 1024 / 1024))
           echo "✅ File exists: models_processed.parquet"
           echo "📊 File size: ${file_size} bytes (${file_size_mb} MB)"
+          
           if [ $file_size -gt 1048576 ]; then
-            echo "✅ File size looks reasonable"
-            python - <<EOF
-        import pandas as pd
-        import sys
-        try:
-            print('🔍 Validating parquet file...')
-            df = pd.read_parquet('models_processed.parquet')
-            print('✅ File validation successful:')
-            print('   - Rows: {:,}'.format(len(df)))
-            print('   - Columns: {}'.format(len(df.columns)))
-            print('   - Column names: {}'.format(list(df.columns)))
-
-            # Check for expected columns from your preprocess.py
-            required_cols = ['id', 'downloads', 'likes', 'params', 'organization', 'has_robot']
-            missing_cols = [col for col in required_cols if col not in df.columns]
-            if missing_cols:
-                print('⚠️ Warning: Missing columns: {}'.format(missing_cols))
-            else:
-                print('✅ All essential columns present')
-
-            # Additional validation specific to your data structure
-            if 'has_robot' in df.columns:
-                robot_count = df['has_robot'].sum()
-                print('   - Models with robotics tags: {:,}'.format(robot_count))
-            
-            if 'organization' in df.columns:
-                org_count = df['organization'].nunique()
-                print('   - Unique organizations: {:,}'.format(org_count))
-
-            if len(df) > 0:
-                print('✅ Data validation passed')
-            else:
-                print('❌ No data in file')
-                sys.exit(1)
-
-        except Exception as e:
-            print('❌ File validation failed: {}'.format(str(e)))
-            sys.exit(1)
-        EOF
-            if [ $? -eq 0 ]; then
-              echo "has_changes=true" >> $GITHUB_OUTPUT
-            else
-              echo "❌ File validation failed"
-              echo "has_changes=false" >> $GITHUB_OUTPUT
-              exit 1
-            fi
+            echo "✅ File size looks reasonable (> 1MB)"
           else
             echo "❌ File size too small (${file_size_mb} MB), might be corrupted"
-            echo "has_changes=false" >> $GITHUB_OUTPUT
             exit 1
           fi
         else
           echo "❌ Output file does not exist"
-          echo "has_changes=false" >> $GITHUB_OUTPUT
           exit 1
         fi
 
-    - name: Upload to Hugging Face Space with retries
-      if: steps.check_output.outputs.has_changes == 'true'
+    - name: Python data validation
+      id: python_validation
+      if: steps.preprocessing_status.outputs.success == 'true'
       run: |
-        echo "=== Uploading to Hugging Face Space ==="
-        upload_to_hf() {
-          local attempt=$1
-          echo "🔄 Upload attempt $attempt"
-          python - <<EOF
+        echo "🔍 Running Python validation..."
+        python - <<EOF
+        import pandas as pd
+        import sys
+        import traceback
+        
+        try:
+            print('📊 Loading parquet file for validation...')
+            df = pd.read_parquet('models_processed.parquet')
+            print('✅ File loaded successfully')
+            print(f'   - Rows: {len(df):,}')
+            print(f'   - Columns: {len(df.columns)}')
+            print(f'   - Memory usage: {df.memory_usage(deep=True).sum() / 1024 / 1024:.2f} MB')
+            
+            # Check for expected columns
+            required_cols = ['id', 'downloads', 'likes', 'params', 'organization', 'has_robot']
+            missing_cols = [col for col in required_cols if col not in df.columns]
+            
+            if missing_cols:
+                print(f'⚠️ Warning: Missing columns: {missing_cols}')
+            else:
+                print('✅ All essential columns present')
+            
+            # Data quality checks
+            print('🔍 Data quality checks:')
+            print(f'   - Null values in id column: {df["id"].isnull().sum()}')
+            print(f'   - Duplicate ids: {df["id"].duplicated().sum()}')
+            
+            if 'has_robot' in df.columns:
+                robot_count = df['has_robot'].sum()
+                print(f'   - Models with robotics tags: {robot_count:,}')
+                
+                # Show some examples if they exist
+                if robot_count > 0:
+                    print('   - Sample robotics models:')
+                    robotics_sample = df[df['has_robot']].head(3)
+                    for _, row in robotics_sample.iterrows():
+                        print(f'     • {row["id"]}')
+            
+            if 'organization' in df.columns:
+                org_count = df['organization'].nunique()
+                print(f'   - Unique organizations: {org_count:,}')
+                
+                # Show top organizations
+                top_orgs = df['organization'].value_counts().head(5)
+                print('   - Top 5 organizations:')
+                for org, count in top_orgs.items():
+                    print(f'     • {org}: {count:,} models')
+            
+            if 'params' in df.columns:
+                param_stats = df['params'].describe()
+                print(f'   - Model size stats (GB):')
+                print(f'     • Mean: {param_stats["mean"]:.2f}')
+                print(f'     • Median: {param_stats["50%"]:.2f}')
+                print(f'     • Max: {param_stats["max"]:.2f}')
+            
+            if len(df) > 0:
+                print('✅ Data validation passed')
+                print(f'📊 Total models processed: {len(df):,}')
+            else:
+                print('❌ No data in file')
+                sys.exit(1)
+                
+        except Exception as e:
+            print(f'❌ Data validation failed: {str(e)}')
+            traceback.print_exc()
+            sys.exit(1)
+        EOF
+
+    - name: Upload to Hugging Face (Attempt 1)
+      id: upload_1
+      if: steps.preprocessing_status.outputs.success == 'true'
+      continue-on-error: true
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: |
+        echo "📤 Starting upload attempt 1/3..."
+        python - <<EOF
         from huggingface_hub import HfApi
         import os
         from datetime import datetime
         import sys
+        
         try:
             api = HfApi()
             timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
             print(f'📤 Uploading to evijit/OrgStats at {timestamp}')
+            
             result = api.upload_file(
                 path_or_fileobj='models_processed.parquet',
                 path_in_repo='models_processed.parquet',
@@ -171,35 +316,103 @@ jobs:
                 token=os.environ['HF_TOKEN'],
                 commit_message=f'Update models data - {timestamp}'
             )
-            print(f'✅ Successfully uploaded to: {result}')
+            print(f'✅ Upload attempt 1 successful: {result}')
+            
         except Exception as e:
-            print(f'❌ Upload failed: {e}')
+            print(f'❌ Upload attempt 1 failed: {e}')
             import traceback
             traceback.print_exc()
             sys.exit(1)
         EOF
-          return $?
-        }
-        max_upload_attempts=3
-        upload_attempt=1
-        while [ $upload_attempt -le $max_upload_attempts ]; do
-          echo "=== Upload Attempt $upload_attempt/$max_upload_attempts ==="
-          if upload_to_hf $upload_attempt; then
-            echo "✅ Upload completed successfully on attempt $upload_attempt"
-            break
-          else
-            exit_code=$?
-            echo "❌ Upload failed on attempt $upload_attempt"
-            if [ $upload_attempt -eq $max_upload_attempts ]; then
-              echo "💥 All upload attempts failed"
-              exit $exit_code
-            else
-              echo "⏳ Waiting 30 seconds before retry..."
-              sleep 30
-              upload_attempt=$((upload_attempt + 1))
-            fi
-          fi
-        done
+
+    - name: Upload to Hugging Face (Attempt 2)
+      id: upload_2
+      if: steps.preprocessing_status.outputs.success == 'true' && steps.upload_1.outcome == 'failure'
+      continue-on-error: true
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: |
+        echo "⏳ Waiting 30 seconds before upload retry..."
+        sleep 30
+        echo "📤 Starting upload attempt 2/3..."
+        python - <<EOF
+        from huggingface_hub import HfApi
+        import os
+        from datetime import datetime
+        import sys
+        
+        try:
+            api = HfApi()
+            timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+            print(f'📤 Uploading to evijit/OrgStats at {timestamp}')
+            
+            result = api.upload_file(
+                path_or_fileobj='models_processed.parquet',
+                path_in_repo='models_processed.parquet',
+                repo_id='evijit/OrgStats',
+                repo_type='space',
+                token=os.environ['HF_TOKEN'],
+                commit_message=f'Update models data - {timestamp} (retry 2)'
+            )
+            print(f'✅ Upload attempt 2 successful: {result}')
+            
+        except Exception as e:
+            print(f'❌ Upload attempt 2 failed: {e}')
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+        EOF
+
+    - name: Upload to Hugging Face (Attempt 3 - Final)
+      id: upload_3
+      if: steps.preprocessing_status.outputs.success == 'true' && steps.upload_1.outcome == 'failure' && steps.upload_2.outcome == 'failure'
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: |
+        echo "⏳ Waiting 30 seconds before final upload attempt..."
+        sleep 30
+        echo "📤 Starting upload attempt 3/3 (FINAL)..."
+        python - <<EOF
+        from huggingface_hub import HfApi
+        import os
+        from datetime import datetime
+        import sys
+        
+        try:
+            api = HfApi()
+            timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+            print(f'📤 Uploading to evijit/OrgStats at {timestamp}')
+            
+            result = api.upload_file(
+                path_or_fileobj='models_processed.parquet',
+                path_in_repo='models_processed.parquet',
+                repo_id='evijit/OrgStats',
+                repo_type='space',
+                token=os.environ['HF_TOKEN'],
+                commit_message=f'Update models data - {timestamp} (final retry)'
+            )
+            print(f'✅ Final upload attempt successful: {result}')
+            
+        except Exception as e:
+            print(f'❌ All upload attempts failed: {e}')
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+        EOF
+
+    - name: Determine upload success
+      id: upload_status
+      if: steps.preprocessing_status.outputs.success == 'true'
+      run: |
+        if [[ "${{ steps.upload_1.outcome }}" == "success" ]] || \
+           [[ "${{ steps.upload_2.outcome }}" == "success" ]] || \
+           [[ "${{ steps.upload_3.outcome }}" == "success" ]]; then
+          echo "✅ Upload completed successfully"
+          echo "success=true" >> $GITHUB_OUTPUT
+        else
+          echo "❌ All upload attempts failed"
+          echo "success=false" >> $GITHUB_OUTPUT
+        fi
 
     - name: Upload artifact as backup
       if: always()
@@ -209,10 +422,10 @@ jobs:
         path: models_processed.parquet
         retention-days: 7
 
-    - name: Performance metrics and cleanup
+    - name: Final system metrics
       if: always()
       run: |
-        echo "=== Performance Metrics ==="
+        echo "=== Final Performance Metrics ==="
         if [ -f "models_processed.parquet" ]; then
           file_size=$(stat -c%s "models_processed.parquet")
           file_size_mb=$((file_size / 1024 / 1024))
@@ -221,23 +434,57 @@ jobs:
         else
           echo "❌ No output file found"
         fi
-        echo "=== System Resources (Final) ==="
+        
+        echo "=== Final System Resources ==="
+        echo "Memory usage:"
         free -h
+        echo "Disk usage:"
         df -h
         echo "=== Cleanup ==="
         rm -f *.tmp 2>/dev/null || true
         rm -f data_meta.txt 2>/dev/null || true
-        echo "🎉 Workflow execution completed!"
 
     - name: Workflow summary
       if: always()
       run: |
-        echo "=== Workflow Summary ==="
-        if [ -f "models_processed.parquet" ]; then
-          echo "✅ SUCCESS: Data processing completed"
-          echo "✅ SUCCESS: File uploaded to Hugging Face Space"
-          echo "📊 Output file size: $(stat -c%s 'models_processed.parquet' | numfmt --to=iec)"
+        echo "=== 🎯 WORKFLOW SUMMARY ==="
+        echo "⏱️ Total execution time: $SECONDS seconds"
+        
+        # Preprocessing summary
+        if [[ "${{ steps.preprocessing_status.outputs.success }}" == "true" ]]; then
+          echo "✅ SUCCESS: Data preprocessing completed"
+          
+          # Determine which attempt succeeded
+          if [[ "${{ steps.check_1.outputs.success }}" == "true" ]]; then
+            echo "   → Succeeded on attempt 1"
+          elif [[ "${{ steps.check_2.outputs.success }}" == "true" ]]; then
+            echo "   → Succeeded on attempt 2"
+          elif [[ "${{ steps.check_final.outputs.success }}" == "true" ]]; then
+            echo "   → Succeeded on attempt 3"
+          fi
         else
-          echo "❌ FAILED: Data processing did not complete successfully"
+          echo "❌ FAILED: Data preprocessing failed after 3 attempts"
         fi
-        echo "⏱️ Total workflow execution time: $SECONDS seconds"
+        
+        # Upload summary
+        if [[ "${{ steps.upload_status.outputs.success }}" == "true" ]]; then
+          echo "✅ SUCCESS: File uploaded to Hugging Face Space"
+          
+          # Determine which upload attempt succeeded
+          if [[ "${{ steps.upload_1.outcome }}" == "success" ]]; then
+            echo "   → Upload succeeded on attempt 1"
+          elif [[ "${{ steps.upload_2.outcome }}" == "success" ]]; then
+            echo "   → Upload succeeded on attempt 2"
+          elif [[ "${{ steps.upload_3.outcome }}" == "success" ]]; then
+            echo "   → Upload succeeded on attempt 3"
+          fi
+        else
+          echo "❌ FAILED: Upload to Hugging Face failed"
+        fi
+        
+        # File info
+        if [ -f "models_processed.parquet" ]; then
+          echo "📊 Output file size: $(stat -c%s 'models_processed.parquet' | numfmt --to=iec)"
+        fi
+        
+        echo "🎉 Workflow execution completed!"
