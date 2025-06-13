@@ -52,8 +52,12 @@ jobs:
         python -c "
         from huggingface_hub import HfApi
         import os
+        from datetime import datetime
         
         api = HfApi()
+        
+        # Get current timestamp
+        timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
         
         # Upload the parquet file to the Space
         api.upload_file(
@@ -62,13 +66,13 @@ jobs:
             repo_id='evijit/OrgStats',
             repo_type='space',
             token=os.environ['HF_TOKEN'],
-            commit_message='Update models data - $(date -u \"+%Y-%m-%d %H:%M:%S UTC\")'
+            commit_message=f'Update models data - {timestamp}'
         )
         
         print('Successfully uploaded models_processed.parquet to HF Space')
         "
 
-    - name: Upload artifact (backup)
+    - name: Upload artifact as backup
       if: always()
       uses: actions/upload-artifact@v4
       with:
