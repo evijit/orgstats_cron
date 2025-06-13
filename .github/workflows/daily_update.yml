@@ -102,12 +102,22 @@ jobs:
             print('   - Columns: {}'.format(len(df.columns)))
             print('   - Column names: {}'.format(list(df.columns)))
 
-            required_cols = ['id', 'downloads', 'likes']
+            # Check for expected columns from your preprocess.py
+            required_cols = ['id', 'downloads', 'likes', 'params', 'organization', 'has_robot']
             missing_cols = [col for col in required_cols if col not in df.columns]
             if missing_cols:
                 print('⚠️ Warning: Missing columns: {}'.format(missing_cols))
             else:
                 print('✅ All essential columns present')
+
+            # Additional validation specific to your data structure
+            if 'has_robot' in df.columns:
+                robot_count = df['has_robot'].sum()
+                print('   - Models with robotics tags: {:,}'.format(robot_count))
+            
+            if 'organization' in df.columns:
+                org_count = df['organization'].nunique()
+                print('   - Unique organizations: {:,}'.format(org_count))
 
             if len(df) > 0:
                 print('✅ Data validation passed')

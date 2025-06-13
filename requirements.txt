@@ -5,3 +5,4 @@ pyarrow
 tqdm
 huggingface-hub
 psutil
+fastparquet
