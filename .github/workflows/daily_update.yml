@@ -92,33 +92,33 @@ jobs:
           if [ $file_size -gt 1048576 ]; then
             echo "✅ File size looks reasonable"
             python - <<EOF
-              import pandas as pd
-              import sys
-              try:
-                  print('🔍 Validating parquet file...')
-                  df = pd.read_parquet('models_processed.parquet')
-                  print('✅ File validation successful:')
-                  print('   - Rows: {:,}'.format(len(df)))
-                  print('   - Columns: {}'.format(len(df.columns)))
-                  print('   - Column names: {}'.format(list(df.columns)))
+        import pandas as pd
+        import sys
+        try:
+            print('🔍 Validating parquet file...')
+            df = pd.read_parquet('models_processed.parquet')
+            print('✅ File validation successful:')
+            print('   - Rows: {:,}'.format(len(df)))
+            print('   - Columns: {}'.format(len(df.columns)))
+            print('   - Column names: {}'.format(list(df.columns)))
 
-                  required_cols = ['id', 'downloads', 'likes']
-                  missing_cols = [col for col in required_cols if col not in df.columns]
-                  if missing_cols:
-                      print('⚠️ Warning: Missing columns: {}'.format(missing_cols))
-                  else:
-                      print('✅ All essential columns present')
+            required_cols = ['id', 'downloads', 'likes']
+            missing_cols = [col for col in required_cols if col not in df.columns]
+            if missing_cols:
+                print('⚠️ Warning: Missing columns: {}'.format(missing_cols))
+            else:
+                print('✅ All essential columns present')
 
-                  if len(df) > 0:
-                      print('✅ Data validation passed')
-                  else:
-                      print('❌ No data in file')
-                      sys.exit(1)
+            if len(df) > 0:
+                print('✅ Data validation passed')
+            else:
+                print('❌ No data in file')
+                sys.exit(1)
 
-              except Exception as e:
-                  print('❌ File validation failed: {}'.format(str(e)))
-                  sys.exit(1)
-              EOF
+        except Exception as e:
+            print('❌ File validation failed: {}'.format(str(e)))
+            sys.exit(1)
+        EOF
             if [ $? -eq 0 ]; then
               echo "has_changes=true" >> $GITHUB_OUTPUT
             else
@@ -145,29 +145,29 @@ jobs:
           local attempt=$1
           echo "🔄 Upload attempt $attempt"
           python - <<EOF
-              from huggingface_hub import HfApi
-              import os
-              from datetime import datetime
-              import sys
-              try:
-                  api = HfApi()
-                  timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
-                  print(f'📤 Uploading to evijit/OrgStats at {timestamp}')
-                  result = api.upload_file(
-                      path_or_fileobj='models_processed.parquet',
-                      path_in_repo='models_processed.parquet',
-                      repo_id='evijit/OrgStats',
-                      repo_type='space',
-                      token=os.environ['HF_TOKEN'],
-                      commit_message=f'Update models data - {timestamp}'
-                  )
-                  print(f'✅ Successfully uploaded to: {result}')
-              except Exception as e:
-                  print(f'❌ Upload failed: {e}')
-                  import traceback
-                  traceback.print_exc()
-                  sys.exit(1)
-            EOF
+        from huggingface_hub import HfApi
+        import os
+        from datetime import datetime
+        import sys
+        try:
+            api = HfApi()
+            timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+            print(f'📤 Uploading to evijit/OrgStats at {timestamp}')
+            result = api.upload_file(
+                path_or_fileobj='models_processed.parquet',
+                path_in_repo='models_processed.parquet',
+                repo_id='evijit/OrgStats',
+                repo_type='space',
+                token=os.environ['HF_TOKEN'],
+                commit_message=f'Update models data - {timestamp}'
+            )
+            print(f'✅ Successfully uploaded to: {result}')
+        except Exception as e:
+            print(f'❌ Upload failed: {e}')
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
+        EOF
           return $?
         }
         max_upload_attempts=3
