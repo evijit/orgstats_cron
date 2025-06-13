@@ -50,7 +50,18 @@ def process_lightweight_chunk(chunk_df):
                     result[col] = chunk_df[col].astype(str).fillna(default)
                 elif col == 'tags':
                     # Special handling for tags column to avoid fillna with list error
-                    result[col] = chunk_df[col].apply(lambda x: x if pd.notna(x) else [])
+                    def safe_tags_fill(x):
+                        try:
+                            # Handle various cases: None, NaN, empty lists, actual lists
+                            if x is None or (isinstance(x, float) and pd.isna(x)):
+                                return []
+                            elif isinstance(x, (list, tuple)):
+                                return list(x) if x else []
+                            else:
+                                return []
+                        except:
+                            return []
+                    result[col] = chunk_df[col].apply(safe_tags_fill)
                 else:
                     result[col] = chunk_df[col].fillna(default)
             else:
