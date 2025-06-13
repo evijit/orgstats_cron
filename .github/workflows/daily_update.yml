@@ -13,9 +13,6 @@ jobs:
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
-      with:
-        token: ${{ secrets.HF_TOKEN }}
-        lfs: true # Enable Git LFS for large files like parquet
 
     - name: Set up Python
       uses: actions/setup-python@v4
@@ -45,23 +42,31 @@ jobs:
           exit 1
         fi
 
-    - name: Commit and push changes
+    - name: Upload to Hugging Face Space
       if: steps.check_changes.outputs.has_changes == 'true'
       run: |
-        git config --local user.email "action@github.com"
-        git config --local user.name "GitHub Action"
+        # Install huggingface_hub for uploading
+        pip install huggingface_hub
         
-        # Add the updated parquet file
-        git add models_processed.parquet
+        # Upload the parquet file to HF Space
+        python -c "
+        from huggingface_hub import HfApi
+        import os
         
-        # Check if there are actually changes to commit
-        if git diff --cached --quiet; then
-          echo "No changes to commit"
-        else
-          # Create commit with timestamp
-          git commit -m "Update models data - $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-          git push
-        fi
+        api = HfApi()
+        
+        # Upload the parquet file to the Space
+        api.upload_file(
+            path_or_fileobj='models_processed.parquet',
+            path_in_repo='models_processed.parquet',
+            repo_id='evijit/OrgStats',
+            repo_type='space',
+            token=os.environ['HF_TOKEN'],
+            commit_message='Update models data - $(date -u \"+%Y-%m-%d %H:%M:%S UTC\")'
+        )
+        
+        print('Successfully uploaded models_processed.parquet to HF Space')
+        "
 
     - name: Upload artifact (backup)
       if: always()
