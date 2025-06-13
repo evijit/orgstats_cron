@@ -144,30 +144,30 @@ jobs:
         upload_to_hf() {
           local attempt=$1
           echo "🔄 Upload attempt $attempt"
-          python -c "
-from huggingface_hub import HfApi
-import os
-from datetime import datetime
-import sys
-try:
-    api = HfApi()
-    timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
-    print(f'📤 Uploading to evijit/OrgStats at {timestamp}')
-    result = api.upload_file(
-        path_or_fileobj='models_processed.parquet',
-        path_in_repo='models_processed.parquet',
-        repo_id='evijit/OrgStats',
-        repo_type='space',
-        token=os.environ['HF_TOKEN'],
-        commit_message=f'Update models data - {timestamp}'
-    )
-    print(f'✅ Successfully uploaded to: {result}')
-except Exception as e:
-    print(f'❌ Upload failed: {e}')
-    import traceback
-    traceback.print_exc()
-    sys.exit(1)
-"
+          python - <<EOF
+              from huggingface_hub import HfApi
+              import os
+              from datetime import datetime
+              import sys
+              try:
+                  api = HfApi()
+                  timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+                  print(f'📤 Uploading to evijit/OrgStats at {timestamp}')
+                  result = api.upload_file(
+                      path_or_fileobj='models_processed.parquet',
+                      path_in_repo='models_processed.parquet',
+                      repo_id='evijit/OrgStats',
+                      repo_type='space',
+                      token=os.environ['HF_TOKEN'],
+                      commit_message=f'Update models data - {timestamp}'
+                  )
+                  print(f'✅ Successfully uploaded to: {result}')
+              except Exception as e:
+                  print(f'❌ Upload failed: {e}')
+                  import traceback
+                  traceback.print_exc()
+                  sys.exit(1)
+            EOF
           return $?
         }
         max_upload_attempts=3
