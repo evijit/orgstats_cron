@@ -9,6 +9,7 @@ on:
 jobs:
   update-data:
     runs-on: ubuntu-latest
+    timeout-minutes: 45  # Set reasonable timeout limit
     
     steps:
     - name: Checkout repository
@@ -24,58 +25,168 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Run preprocessing script
+    - name: Log system resources
+      run: |
+        echo "=== System Information ==="
+        df -h
+        free -h
+        nproc
+        echo "=========================="
+
+    - name: Run preprocessing script with retries
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
-        python preprocess.py
+        echo "Starting data preprocessing..."
+        
+        # Function to run preprocessing with timeout and retries
+        run_preprocessing() {
+          local attempt=$1
+          echo "Attempt $attempt: Running preprocess.py"
+          
+          # Run with timeout to prevent hanging
+          timeout 1800s python preprocess.py  # 30 minute timeout for processing
+          return $?
+        }
+        
+        # Retry logic
+        max_attempts=3
+        attempt=1
+        
+        while [ $attempt -le $max_attempts ]; do
+          echo "=== Preprocessing Attempt $attempt/$max_attempts ==="
+          
+          if run_preprocessing $attempt; then
+            echo "✅ Preprocessing completed successfully on attempt $attempt"
+            break
+          else
+            exit_code=$?
+            echo "❌ Preprocessing failed on attempt $attempt (exit code: $exit_code)"
+            
+            if [ $attempt -eq $max_attempts ]; then
+              echo "💥 All attempts failed. Exiting."
+              exit $exit_code
+            else
+              echo "⏳ Waiting 30 seconds before retry..."
+              sleep 30
+              
+              # Clean up any partial files before retry
+              rm -f models_processed.parquet.tmp 2>/dev/null || true
+              
+              attempt=$((attempt + 1))
+            fi
+          fi
+        done
 
-    - name: Check if parquet file was updated
+    - name: Verify output file
       id: check_changes
       run: |
         if [ -f "models_processed.parquet" ]; then
-          echo "File exists and was potentially updated"
-          echo "has_changes=true" >> $GITHUB_OUTPUT
+          file_size=$(stat -c%s "models_processed.parquet")
+          echo "✅ File exists: models_processed.parquet (${file_size} bytes)"
+          
+          # Check if file is reasonable size (> 1MB)
+          if [ $file_size -gt 1048576 ]; then
+            echo "✅ File size looks reasonable"
+            echo "has_changes=true" >> $GITHUB_OUTPUT
+          else
+            echo "⚠️ File size seems too small, might be corrupted"
+            echo "has_changes=false" >> $GITHUB_OUTPUT
+            exit 1
+          fi
         else
-          echo "File does not exist - something went wrong"
+          echo "❌ File does not exist - preprocessing failed"
           echo "has_changes=false" >> $GITHUB_OUTPUT
           exit 1
         fi
 
-    - name: Upload to Hugging Face Space
+    - name: Upload to Hugging Face Space with retries
       if: steps.check_changes.outputs.has_changes == 'true'
       run: |
-        # Install huggingface_hub for uploading
-        pip install huggingface_hub
+        echo "Starting upload to Hugging Face Space..."
         
-        # Upload the parquet file to HF Space
-        python -c "
+        # Function to upload with retry logic
+        upload_to_hf() {
+          local attempt=$1
+          echo "Upload attempt $attempt"
+          
+          python -c "
         from huggingface_hub import HfApi
         import os
         from datetime import datetime
+        import sys
         
-        api = HfApi()
-        
-        # Get current timestamp
-        timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
-        
-        # Upload the parquet file to the Space
-        api.upload_file(
-            path_or_fileobj='models_processed.parquet',
-            path_in_repo='models_processed.parquet',
-            repo_id='evijit/OrgStats',
-            repo_type='space',
-            token=os.environ['HF_TOKEN'],
-            commit_message=f'Update models data - {timestamp}'
-        )
-        
-        print('Successfully uploaded models_processed.parquet to HF Space')
+        try:
+            api = HfApi()
+            
+            # Get current timestamp
+            timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
+            
+            print(f'📤 Uploading to evijit/OrgStats at {timestamp}')
+            
+            # Upload the parquet file to the Space
+            api.upload_file(
+                path_or_fileobj='models_processed.parquet',
+                path_in_repo='models_processed.parquet',
+                repo_id='evijit/OrgStats',
+                repo_type='space',
+                token=os.environ['HF_TOKEN'],
+                commit_message=f'Update models data - {timestamp}'
+            )
+            
+            print('✅ Successfully uploaded models_processed.parquet to HF Space')
+        except Exception as e:
+            print(f'❌ Upload failed: {str(e)}')
+            sys.exit(1)
         "
+          return $?
+        }
+        
+        # Upload retry logic
+        max_upload_attempts=3
+        upload_attempt=1
+        
+        while [ $upload_attempt -le $max_upload_attempts ]; do
+          echo "=== Upload Attempt $upload_attempt/$max_upload_attempts ==="
+          
+          if upload_to_hf $upload_attempt; then
+            echo "✅ Upload completed successfully on attempt $upload_attempt"
+            break
+          else
+            exit_code=$?
+            echo "❌ Upload failed on attempt $upload_attempt"
+            
+            if [ $upload_attempt -eq $max_upload_attempts ]; then
+              echo "💥 All upload attempts failed. Exiting."
+              exit $exit_code
+            else
+              echo "⏳ Waiting 10 seconds before retry..."
+              sleep 10
+              upload_attempt=$((upload_attempt + 1))
+            fi
+          fi
+        done
 
     - name: Upload artifact as backup
-      if: always()
+      if: always()  # Always run, even if previous steps failed
       uses: actions/upload-artifact@v4
       with:
-        name: models-processed-parquet
+        name: models-processed-parquet-${{ github.run_number }}
         path: models_processed.parquet
         retention-days: 7
+
+    - name: Cleanup and final status
+      if: always()
+      run: |
+        echo "=== Final Status ==="
+        if [ -f "models_processed.parquet" ]; then
+          ls -lh models_processed.parquet
+          echo "✅ Parquet file exists"
+        else
+          echo "❌ No parquet file found"
+        fi
+        
+        echo "=== Disk Usage After Processing ==="
+        df -h
+        
+        echo "=== Workflow completed ==="

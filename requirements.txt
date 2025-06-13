@@ -4,3 +4,4 @@ duckdb
 pyarrow
 tqdm
 huggingface-hub
+psutil

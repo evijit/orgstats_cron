@@ -9,6 +9,8 @@ import time
 import os
 import duckdb
 import re # Import re for the manual regex check in debug
+import gc
+import psutil
 
 # --- Constants ---
 PROCESSED_PARQUET_FILE_PATH = "models_processed.parquet"
@@ -27,6 +29,67 @@ MODEL_SIZE_RANGES = {
 MODEL_ID_TO_DEBUG = "openvla/openvla-7b" 
 # Example: MODEL_ID_TO_DEBUG = "openai-community/gpt2" 
 # If you don't have a specific ID, the debug block will just report it's not found.
+
+
+def get_memory_usage():
+    """Get current memory usage in MB"""
+    try:
+        process = psutil.Process()
+        return f"{process.memory_info().rss / 1024 / 1024:.1f} MB"
+    except:
+        return "Unknown"
+
+def process_data_chunk(chunk_df):
+    """Process a chunk of the raw data"""
+    df_chunk = pd.DataFrame()
+    
+    # Setup expected columns for the chunk
+    expected_cols_setup = {
+        'id': str, 'downloads': float, 'downloadsAllTime': float, 'likes': float,
+        'pipeline_tag': str, 'tags': object, 'safetensors': object
+    }
+    
+    for col_name, target_dtype in expected_cols_setup.items():
+        if col_name in chunk_df.columns:
+            df_chunk[col_name] = chunk_df[col_name]
+            if target_dtype == float: 
+                df_chunk[col_name] = pd.to_numeric(df_chunk[col_name], errors='coerce').fillna(0.0)
+            elif target_dtype == str: 
+                df_chunk[col_name] = df_chunk[col_name].astype(str).fillna('')
+        else: 
+            if col_name in ['downloads', 'downloadsAllTime', 'likes']: 
+                df_chunk[col_name] = 0.0
+            elif col_name == 'pipeline_tag': 
+                df_chunk[col_name] = ''
+            elif col_name == 'tags': 
+                df_chunk[col_name] = pd.Series([[] for _ in range(len(chunk_df))])
+            elif col_name == 'safetensors': 
+                df_chunk[col_name] = None
+            elif col_name == 'id': 
+                print("CRITICAL ERROR: 'id' column missing in chunk."); 
+                return None
+    
+    # Process file size
+    output_filesize_col_name = 'params'
+    if output_filesize_col_name in chunk_df.columns and pd.api.types.is_numeric_dtype(chunk_df[output_filesize_col_name]):
+        df_chunk[output_filesize_col_name] = pd.to_numeric(chunk_df[output_filesize_col_name], errors='coerce').fillna(0.0)
+    elif 'safetensors' in df_chunk.columns:
+        df_chunk[output_filesize_col_name] = df_chunk['safetensors'].apply(extract_model_file_size_gb)
+        df_chunk[output_filesize_col_name] = pd.to_numeric(df_chunk[output_filesize_col_name], errors='coerce').fillna(0.0)
+    else:
+        df_chunk[output_filesize_col_name] = 0.0
+    
+    # Add size category
+    df_chunk['size_category'] = df_chunk[output_filesize_col_name].apply(get_file_size_category)
+    
+    # Process tags
+    df_chunk['tags'] = process_tags_for_series(df_chunk['tags'])
+    
+    # Add organization
+    df_chunk['organization'] = df_chunk['id'].apply(extract_org_from_id)
+    
+    return df_chunk
+
 
 # --- Utility Functions (extract_model_file_size_gb, extract_org_from_id, process_tags_for_series, get_file_size_category - unchanged from previous correct version) ---
 def extract_model_file_size_gb(safetensors_data):
@@ -168,9 +231,9 @@ def get_file_size_category(file_size_gb_val):
     elif numeric_file_size_gb >= 50: return "XX-Large (>50GB)"
     else: return "Small (<1GB)"
 
-
 def main_preprocessor():
     print(f"Starting pre-processing script. Output: '{PROCESSED_PARQUET_FILE_PATH}'.")
+    print(f"Initial memory usage: {get_memory_usage()}")
     overall_start_time = time.time()
 
     print(f"Fetching fresh data from Hugging Face: {HF_PARQUET_URL}")
@@ -180,82 +243,94 @@ def main_preprocessor():
         df_raw = duckdb.sql(query).df()
         data_download_timestamp = pd.Timestamp.now(tz='UTC')
         
-        if df_raw is None or df_raw.empty: raise ValueError("Fetched data is empty or None.")
-        if 'id' not in df_raw.columns: raise ValueError("Fetched data must contain 'id' column.")
+        if df_raw is None or df_raw.empty: 
+            raise ValueError("Fetched data is empty or None.")
+        if 'id' not in df_raw.columns: 
+            raise ValueError("Fetched data must contain 'id' column.")
         
         print(f"Fetched data in {time.time() - fetch_start_time:.2f}s. Rows: {len(df_raw)}. Downloaded at: {data_download_timestamp.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        print(f"Memory usage after fetch: {get_memory_usage()}")
+        
     except Exception as e_fetch:
         print(f"ERROR: Could not fetch data from Hugging Face: {e_fetch}.")
         return
 
-    df = pd.DataFrame()
     print("Processing raw data...")
     proc_start = time.time()
-
-    expected_cols_setup = {
-        'id': str, 'downloads': float, 'downloadsAllTime': float, 'likes': float,
-        'pipeline_tag': str, 'tags': object, 'safetensors': object
-    }
-    for col_name, target_dtype in expected_cols_setup.items():
-        if col_name in df_raw.columns:
-            df[col_name] = df_raw[col_name]
-            if target_dtype == float: df[col_name] = pd.to_numeric(df[col_name], errors='coerce').fillna(0.0)
-            elif target_dtype == str: df[col_name] = df[col_name].astype(str).fillna('')
-        else: 
-            if col_name in ['downloads', 'downloadsAllTime', 'likes']: df[col_name] = 0.0
-            elif col_name == 'pipeline_tag': df[col_name] = ''
-            elif col_name == 'tags': df[col_name] = pd.Series([[] for _ in range(len(df_raw))]) # Initialize with empty lists
-            elif col_name == 'safetensors': df[col_name] = None # Initialize with None
-            elif col_name == 'id': print("CRITICAL ERROR: 'id' column missing."); return
     
-    output_filesize_col_name = 'params' 
-    if output_filesize_col_name in df_raw.columns and pd.api.types.is_numeric_dtype(df_raw[output_filesize_col_name]):
-        print(f"Using pre-existing '{output_filesize_col_name}' column as file size in GB.")
-        df[output_filesize_col_name] = pd.to_numeric(df_raw[output_filesize_col_name], errors='coerce').fillna(0.0)
-    elif 'safetensors' in df.columns:
-        print(f"Calculating '{output_filesize_col_name}' (file size in GB) from 'safetensors' data...")
-        df[output_filesize_col_name] = df['safetensors'].apply(extract_model_file_size_gb)
-        df[output_filesize_col_name] = pd.to_numeric(df[output_filesize_col_name], errors='coerce').fillna(0.0)
+    # Determine if we need to process in chunks
+    chunk_size = 50000  # Process 50k rows at a time
+    total_rows = len(df_raw)
+    
+    if total_rows > chunk_size:
+        print(f"Large dataset detected ({total_rows:,} rows), processing in chunks of {chunk_size:,}...")
+        processed_chunks = []
+        
+        for i in range(0, total_rows, chunk_size):
+            chunk_start = time.time()
+            end_idx = min(i + chunk_size, total_rows)
+            chunk = df_raw.iloc[i:end_idx].copy()
+            
+            print(f"Processing chunk {i//chunk_size + 1}/{(total_rows-1)//chunk_size + 1} (rows {i:,}-{end_idx-1:,})")
+            
+            processed_chunk = process_data_chunk(chunk)
+            if processed_chunk is None:
+                print("ERROR: Chunk processing failed")
+                return
+                
+            processed_chunks.append(processed_chunk)
+            
+            # Memory cleanup
+            del chunk
+            gc.collect()
+            
+            chunk_time = time.time() - chunk_start
+            print(f"Chunk processed in {chunk_time:.2f}s, memory: {get_memory_usage()}")
+        
+        print("Combining processed chunks...")
+        df = pd.concat(processed_chunks, ignore_index=True)
+        del processed_chunks
+        gc.collect()
+        print(f"Chunks combined, memory: {get_memory_usage()}")
+        
     else:
-        print(f"Cannot determine file size. Setting '{output_filesize_col_name}' to 0.0.")
-        df[output_filesize_col_name] = 0.0
+        print("Small dataset, processing all at once...")
+        df = process_data_chunk(df_raw)
+        if df is None:
+            print("ERROR: Data processing failed")
+            return
     
+    # Clean up raw data
+    del df_raw
+    gc.collect()
+    print(f"Memory after cleanup: {get_memory_usage()}")
+    
+    # Add timestamp
     df['data_download_timestamp'] = data_download_timestamp
     print(f"Added 'data_download_timestamp' column.")
 
-    print("Categorizing models by file size...")
-    df['size_category'] = df[output_filesize_col_name].apply(get_file_size_category)
-
-    print("Standardizing 'tags' column...")
-    df['tags'] = process_tags_for_series(df['tags']) # This now uses tqdm internally
-
     # --- START DEBUGGING BLOCK ---
-    # This block will execute before the main tag processing loop
-    if MODEL_ID_TO_DEBUG and MODEL_ID_TO_DEBUG in df['id'].values: # Check if ID exists
+    if MODEL_ID_TO_DEBUG and MODEL_ID_TO_DEBUG in df['id'].values:
         print(f"\n--- Pre-Loop Debugging for Model ID: {MODEL_ID_TO_DEBUG} ---")
         
-        # 1. Check the 'tags' column content after process_tags_for_series
         model_specific_tags_list = df.loc[df['id'] == MODEL_ID_TO_DEBUG, 'tags'].iloc[0]
         print(f"1. Tags from df['tags'] (after process_tags_for_series): {model_specific_tags_list}")
         print(f"   Type of tags: {type(model_specific_tags_list)}")
         if isinstance(model_specific_tags_list, list):
             for i, tag_item in enumerate(model_specific_tags_list):
                 print(f"   Tag item {i}: '{tag_item}' (type: {type(tag_item)}, len: {len(str(tag_item))})")
-                # Detailed check for 'robotics' specifically
                 if 'robotics' in str(tag_item).lower():
                     print(f"     DEBUG: Found 'robotics' substring in '{tag_item}'")
                     print(f"       - str(tag_item).lower().strip(): '{str(tag_item).lower().strip()}'")
                     print(f"       - Is it exactly 'robotics'?: {str(tag_item).lower().strip() == 'robotics'}")
                     print(f"       - Ordinals: {[ord(c) for c in str(tag_item)]}")
 
-        # 2. Simulate temp_tags_joined for this specific model
         if isinstance(model_specific_tags_list, list):
             simulated_temp_tags_joined = '~~~'.join(str(t).lower().strip() for t in model_specific_tags_list if pd.notna(t) and str(t).strip())
         else:
             simulated_temp_tags_joined = ''
         print(f"2. Simulated 'temp_tags_joined' for this model: '{simulated_temp_tags_joined}'")
 
-        # 3. Simulate 'has_robot' check for this model
         robot_keywords = ['robot', 'robotics']
         robot_pattern = '|'.join(robot_keywords)
         manual_robot_check = bool(re.search(robot_pattern, simulated_temp_tags_joined, flags=re.IGNORECASE))
@@ -265,10 +340,10 @@ def main_preprocessor():
         print(f"DEBUG: Model ID '{MODEL_ID_TO_DEBUG}' not found in DataFrame for pre-loop debugging.")
     # --- END DEBUGGING BLOCK ---
 
-
     print("Vectorized creation of cached tag columns...")
     tag_time = time.time()
-    # This is the original temp_tags_joined creation:
+    
+    # Create temp_tags_joined column
     df['temp_tags_joined'] = df['tags'].apply(
         lambda tl: '~~~'.join(str(t).lower().strip() for t in tl if pd.notna(t) and str(t).strip()) if isinstance(tl, list) else ''
     )
@@ -281,6 +356,7 @@ def main_preprocessor():
         'has_video': ['video'], 'has_image': ['image', 'vision'], 
         'has_text': ['text', 'nlp', 'llm'] 
     }
+    
     for col, kws in tag_map.items():
         pattern = '|'.join(kws) 
         df[col] = df['temp_tags_joined'].str.contains(pattern, na=False, case=False, regex=True)
@@ -289,11 +365,17 @@ def main_preprocessor():
         df['temp_tags_joined'].str.contains('science', na=False, case=False, regex=True) &
         ~df['temp_tags_joined'].str.contains('bigscience', na=False, case=False, regex=True) 
     )
-    del df['temp_tags_joined'] # Clean up temporary column
+    
+    # Clean up temporary column
+    del df['temp_tags_joined']
+    
+    # Create combined columns
     df['is_audio_speech'] = (df['has_audio'] | df['has_speech'] |
                             df['pipeline_tag'].str.contains('audio|speech', case=False, na=False, regex=True))
     df['is_biomed'] = df['has_bio'] | df['has_med']
+    
     print(f"Vectorized tag columns created in {time.time() - tag_time:.2f}s.")
+    print(f"Memory after tag processing: {get_memory_usage()}")
 
     # --- POST-LOOP DIAGNOSTIC for has_robot & a specific model ---
     if 'has_robot' in df.columns:
@@ -314,13 +396,9 @@ def main_preprocessor():
         print("--------------------------------------------------------\n")
     # --- END POST-LOOP DIAGNOSTIC ---
 
-
-    print("Adding organization column...")
-    df['organization'] = df['id'].apply(extract_org_from_id)
-
-    # Drop safetensors if params was calculated from it, and params didn't pre-exist as numeric
-    if 'safetensors' in df.columns and \
-       not (output_filesize_col_name in df_raw.columns and pd.api.types.is_numeric_dtype(df_raw[output_filesize_col_name])):
+    # Drop safetensors if params was calculated from it
+    output_filesize_col_name = 'params'
+    if 'safetensors' in df.columns:
         df = df.drop(columns=['safetensors'], errors='ignore')
     
     final_expected_cols = [
@@ -331,27 +409,46 @@ def main_preprocessor():
         'is_audio_speech', 'is_biomed',
         'data_download_timestamp'
     ]
-    # Ensure all final columns exist, adding defaults if necessary
+    
+    # Ensure all final columns exist
     for col in final_expected_cols:
         if col not in df.columns:
             print(f"Warning: Final expected column '{col}' is missing! Defaulting appropriately.")
             if col == 'params': df[col] = 0.0
-            elif col == 'size_category': df[col] = "Small (<1GB)" # Default size category
-            elif 'has_' in col or 'is_' in col : df[col] = False # Default boolean flags to False
-            elif col == 'data_download_timestamp': df[col] = pd.NaT # Default timestamp to NaT
+            elif col == 'size_category': df[col] = "Small (<1GB)"
+            elif 'has_' in col or 'is_' in col : df[col] = False
+            elif col == 'data_download_timestamp': df[col] = pd.NaT
 
     print(f"Data processing completed in {time.time() - proc_start:.2f}s.")
+    print(f"Final memory usage: {get_memory_usage()}")
+    
     try:
         print(f"Saving processed data to: {PROCESSED_PARQUET_FILE_PATH}")
-        df_to_save = df[final_expected_cols].copy() # Ensure only expected columns are saved
-        df_to_save.to_parquet(PROCESSED_PARQUET_FILE_PATH, index=False, engine='pyarrow')
-        print(f"Successfully saved processed data.")
+        df_to_save = df[final_expected_cols].copy()
+        
+        # Use compression to reduce file size
+        df_to_save.to_parquet(
+            PROCESSED_PARQUET_FILE_PATH, 
+            index=False, 
+            engine='pyarrow',
+            compression='snappy'  # Add compression
+        )
+        
+        # Get final file size
+        file_size = os.path.getsize(PROCESSED_PARQUET_FILE_PATH) / (1024 * 1024)  # MB
+        print(f"Successfully saved processed data. File size: {file_size:.1f} MB")
+        
     except Exception as e_save:
         print(f"ERROR: Could not save processed data: {e_save}")
         return
 
+    # Final cleanup
+    del df, df_to_save
+    gc.collect()
+    
     total_elapsed_script = time.time() - overall_start_time
-    print(f"Pre-processing finished. Total time: {total_elapsed_script:.2f}s. Final Parquet shape: {df_to_save.shape}")
+    print(f"Pre-processing finished. Total time: {total_elapsed_script:.2f}s. Final shape: {len(final_expected_cols)} columns")
+    print(f"Final memory usage: {get_memory_usage()}")
 
 if __name__ == "__main__":
     if os.path.exists(PROCESSED_PARQUET_FILE_PATH):
