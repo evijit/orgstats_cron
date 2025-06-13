@@ -44,8 +44,8 @@ jobs:
 import psutil
 available_gb = psutil.virtual_memory().available / (1024**3)
 process_mb = psutil.Process().memory_info().rss / (1024**2)
-print(f'Available memory: {available_gb:.1f} GB')
-print(f'Process memory: {process_mb:.1f} MB')
+print('Available memory: {:.1f} GB'.format(available_gb))
+print('Process memory: {:.1f} MB'.format(process_mb))
 "
         echo "=========================="
 
@@ -120,16 +120,16 @@ import sys
 try:
     print('🔍 Validating parquet file...')
     df = pd.read_parquet('models_processed.parquet')
-    print(f'✅ File validation successful:')
-    print(f'   - Rows: {len(df):,}')
-    print(f'   - Columns: {len(df.columns)}')
-    print(f'   - Column names: {list(df.columns)}')
+    print('✅ File validation successful:')
+    print('   - Rows: {:,}'.format(len(df)))
+    print('   - Columns: {}'.format(len(df.columns)))
+    print('   - Column names: {}'.format(list(df.columns)))
     
     # Check for essential columns
     required_cols = ['id', 'downloads', 'likes']
     missing_cols = [col for col in required_cols if col not in df.columns]
     if missing_cols:
-        print(f'⚠️ Warning: Missing columns: {missing_cols}')
+        print('⚠️ Warning: Missing columns: {}'.format(missing_cols))
     else:
         print('✅ All essential columns present')
     
@@ -140,7 +140,7 @@ try:
         sys.exit(1)
         
 except Exception as e:
-    print(f'❌ File validation failed: {e}')
+    print('❌ File validation failed: {}'.format(str(e)))
     sys.exit(1)
 "
             
@@ -181,7 +181,7 @@ try:
     api = HfApi()
     timestamp = datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S UTC')
     
-    print(f'📤 Uploading to evijit/OrgStats at {timestamp}')
+    print('📤 Uploading to evijit/OrgStats at {}'.format(timestamp))
     
     # Upload with progress
     result = api.upload_file(
@@ -190,13 +190,13 @@ try:
         repo_id='evijit/OrgStats',
         repo_type='space',
         token=os.environ['HF_TOKEN'],
-        commit_message=f'Update models data - {timestamp}'
+        commit_message='Update models data - {}'.format(timestamp)
     )
     
-    print(f'✅ Successfully uploaded to: {result}')
+    print('✅ Successfully uploaded to: {}'.format(result))
     
 except Exception as e:
-    print(f'❌ Upload failed: {str(e)}')
+    print('❌ Upload failed: {}'.format(str(e)))
     import traceback
     traceback.print_exc()
     sys.exit(1)
