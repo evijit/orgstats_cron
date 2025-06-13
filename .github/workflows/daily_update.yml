@@ -15,7 +15,6 @@ jobs:
     timeout-minutes: 60
     strategy:
       fail-fast: false
-      max-attempts: 3
 
     steps:
     - name: Checkout repository
