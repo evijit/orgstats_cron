@@ -48,13 +48,20 @@ def process_lightweight_chunk(chunk_df):
                     result[col] = pd.to_numeric(chunk_df[col], errors='coerce').fillna(default)
                 elif dtype == str:
                     result[col] = chunk_df[col].astype(str).fillna(default)
+                elif col == 'tags':
+                    # Special handling for tags column to avoid fillna with list error
+                    result[col] = chunk_df[col].apply(lambda x: x if pd.notna(x) else [])
                 else:
                     result[col] = chunk_df[col].fillna(default)
             else:
                 if col == 'tags':
                     result[col] = [[] for _ in range(len(chunk_df))]
-                else:
+                elif dtype == float:
                     result[col] = default
+                elif dtype == str:
+                    result[col] = default
+                else:
+                    result[col] = [default] * len(chunk_df)  # Create series with default values
         
         # Handle file size - simplified version
         if 'params' in chunk_df.columns and pd.api.types.is_numeric_dtype(chunk_df['params']):
