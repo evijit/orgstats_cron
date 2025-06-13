@@ -38,13 +38,7 @@ jobs:
         echo "Memory total: $(free -h | grep 'Mem:' | awk '{print $2}')"
         echo "Memory available: $(free -h | grep 'Mem:' | awk '{print $7}')"
         echo "Disk space: $(df -h / | tail -1 | awk '{print $4}')"
-        echo "Swap: $(free -h | grep 'Swap:' | awk '{print $2}')"
         echo "Python version: $(python --version)"
-        echo "Working directory: $(pwd)"
-        echo "Files in directory: $(ls -la)"
-        echo ""
-        echo "=== Python Environment ==="
-        pip list | grep -E "(pandas|psutil|duckdb|pyarrow|tqdm)" || echo "Some packages not found"
         echo ""
         echo "=== Module Verification ==="
         python - <<EOF
@@ -64,12 +58,15 @@ jobs:
         echo "=========================="
 
     - name: Test individual modules
+      id: module_tests
       run: |
         echo "=== Testing Individual Modules ==="
 
+        # --- FIX: Increased timeout and added specific error handling ---
         echo "🧪 Testing data_fetcher module..."
-        # Use timeout and check the exit code of the python script
-        if ! timeout 300s python - <<EOF; then
+        # Increased timeout to 15 minutes (900s) for network robustness.
+        # The timeout command exits with 124 when it kills the process.
+        timeout 900s python - <<EOF > data_fetcher_test.log 2>&1
         from data_fetcher import fetch_raw_data, validate_raw_data
         from utils import log_progress
         import sys
@@ -79,19 +76,36 @@ jobs:
             validate_raw_data(df_raw)
             log_progress(f'✅ Data fetcher test passed - {len(df_raw):,} rows')
         except Exception as e:
-            log_progress(f'❌ Data fetcher test failed: {e}')
-            sys.exit(1) # Exit with error code to be caught by the shell
+            log_progress(f'❌ Data fetcher test failed in Python: {e}')
+            import traceback
+            traceback.print_exc()
+            sys.exit(1)
         EOF
-            echo "❌ Data fetcher test failed"
+
+        exit_code=$?
+        echo "--- Log from data_fetcher test ---"
+        cat data_fetcher_test.log
+        echo "------------------------------------"
+
+        if [ $exit_code -ne 0 ]; then
+            if [ $exit_code -eq 124 ]; then
+                echo "❌ FATAL: Data fetcher test FAILED due to TIMEOUT (exceeded 15 minutes)."
+            else
+                echo "❌ FATAL: Data fetcher test FAILED with exit code $exit_code. See log above for Python errors."
+            fi
+            exit 1
+        else
+            echo "✅ Data fetcher test PASSED."
         fi
+        # --- END OF FIX ---
 
         echo ""
         echo "🧪 Testing tag_processor module..."
-        python tag_processor.py || echo "❌ Tag processor test failed"
+        python tag_processor.py || exit 1
 
         echo ""
         echo "🧪 Testing data_processor module..."
-        python data_processor.py || echo "❌ Data processor test failed"
+        python data_processor.py || exit 1
 
         echo "=== Module Testing Complete ==="
 
@@ -227,7 +241,7 @@ jobs:
                     log_with_timestamp(f'      {size_cat}: {count:,} ({pct:.1f}%)')
 
             if 'data_download_timestamp' in df.columns:
-                latest_timestamp = df['data_download_timestamp'].max()
+                latest_timestamp = pd.to_datetime(df['data_download_timestamp']).max()
                 log_with_timestamp(f'   ⏰ Data timestamp: {latest_timestamp}')
 
             if len(df) < 100000:
