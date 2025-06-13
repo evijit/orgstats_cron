@@ -48,28 +48,22 @@ jobs:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
         echo "Starting data preprocessing with retry logic..."
-
         run_preprocessing() {
           local attempt=$1
           echo "=== Preprocessing Attempt $attempt ==="
-
           timeout 2400s python preprocess.py
           return $?
         }
-
         max_attempts=3
         attempt=1
-
         while [ $attempt -le $max_attempts ]; do
           echo "🔄 Running preprocessing (attempt $attempt/$max_attempts)"
-
           if run_preprocessing $attempt; then
             echo "✅ Preprocessing completed successfully on attempt $attempt"
             break
           else
             exit_code=$?
             echo "❌ Preprocessing failed on attempt $attempt (exit code: $exit_code)"
-
             if [ $attempt -eq $max_attempts ]; then
               echo "💥 All preprocessing attempts failed"
               exit $exit_code
@@ -78,11 +72,9 @@ jobs:
               sleep 60
               rm -f models_processed.parquet.tmp 2>/dev/null || true
               rm -f *.tmp 2>/dev/null || true
-
               echo "System state before retry:"
               free -h
               df -h
-
               attempt=$((attempt + 1))
             fi
           fi
@@ -92,17 +84,13 @@ jobs:
       id: check_output
       run: |
         echo "=== Output Verification ==="
-
         if [ -f "models_processed.parquet" ]; then
           file_size=$(stat -c%s "models_processed.parquet")
           file_size_mb=$((file_size / 1024 / 1024))
-
           echo "✅ File exists: models_processed.parquet"
           echo "📊 File size: ${file_size} bytes (${file_size_mb} MB)"
-
-          if [ $file_size -gt 1048576 ]; then  # > 1MB
+          if [ $file_size -gt 1048576 ]; then
             echo "✅ File size looks reasonable"
-
             python -c "
 import pandas as pd
 import sys
@@ -131,7 +119,6 @@ except Exception as e:
     print('❌ File validation failed: {}'.format(str(e)))
     sys.exit(1)
 "
-
             if [ $? -eq 0 ]; then
               echo "has_changes=true" >> $GITHUB_OUTPUT
             else
@@ -154,11 +141,9 @@ except Exception as e:
       if: steps.check_output.outputs.has_changes == 'true'
       run: |
         echo "=== Uploading to Hugging Face Space ==="
-
         upload_to_hf() {
           local attempt=$1
           echo "🔄 Upload attempt $attempt"
-
           python -c "
 from huggingface_hub import HfApi
 import os
@@ -183,23 +168,18 @@ except Exception as e:
     traceback.print_exc()
     sys.exit(1)
 "
-
           return $?
         }
-
         max_upload_attempts=3
         upload_attempt=1
-
         while [ $upload_attempt -le $max_upload_attempts ]; do
           echo "=== Upload Attempt $upload_attempt/$max_upload_attempts ==="
-
           if upload_to_hf $upload_attempt; then
             echo "✅ Upload completed successfully on attempt $upload_attempt"
             break
           else
             exit_code=$?
             echo "❌ Upload failed on attempt $upload_attempt"
-
             if [ $upload_attempt -eq $max_upload_attempts ]; then
               echo "💥 All upload attempts failed"
               exit $exit_code
@@ -231,15 +211,12 @@ except Exception as e:
         else
           echo "❌ No output file found"
         fi
-
         echo "=== System Resources (Final) ==="
         free -h
         df -h
-
         echo "=== Cleanup ==="
         rm -f *.tmp 2>/dev/null || true
         rm -f data_meta.txt 2>/dev/null || true
-
         echo "🎉 Workflow execution completed!"
 
     - name: Workflow summary
