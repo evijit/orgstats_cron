@@ -42,8 +42,10 @@ jobs:
         echo "Python memory check:"
         python -c "
 import psutil
-print(f'Available memory: {psutil.virtual_memory().available / (1024**3):.1f} GB')
-print(f'Process memory: {psutil.Process().memory_info().rss / (1024**2):.1f} MB')
+available_gb = psutil.virtual_memory().available / (1024**3)
+process_mb = psutil.Process().memory_info().rss / (1024**2)
+print(f'Available memory: {available_gb:.1f} GB')
+print(f'Process memory: {process_mb:.1f} MB')
 "
         echo "=========================="
 
