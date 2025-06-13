@@ -1,0 +1,6 @@
+pandas
+numpy
+duckdb
+pyarrow
+tqdm
+huggingface-hub
