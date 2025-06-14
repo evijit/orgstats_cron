@@ -28,8 +28,9 @@ jobs:
 
       - name: Clone target Hugging Face repository
         run: |
-          # Clones the destination dataset repo using the HF_TOKEN for authentication
-          git clone https://huggingface-bot:${{ secrets.HF_TOKEN }}@huggingface.co/datasets/hflmsoc/hub_weekly_snapshots target_repo
+          # CORRECTED: Cloning the public repo. No token is needed for this read-only operation.
+          # CORRECTED: Fixed the typo in the repository name from 'hflmsoc' to 'hfmlsoc'.
+          git clone https://huggingface.co/datasets/hfmlsoc/hub_weekly_snapshots target_repo
 
       - name: Run the snapshot generation script
         run: |
@@ -38,9 +39,17 @@ jobs:
 
       - name: Commit and push new snapshots one-by-one
         working-directory: ./target_repo
+        env:
+          # Make the token available as an environment variable in this step
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
+          # Configure git user for the commits
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          # NEW: Add the token to the remote URL ONLY for the push operation.
+          # This is more secure and explicit than using it for the initial clone.
+          git remote set-url origin https://huggingface-bot:${HF_TOKEN}@huggingface.co/datasets/hfmlsoc/hub_weekly_snapshots
 
           # List of categories the python script creates
           ITEMS="daily_papers datasets models spaces"
@@ -50,15 +59,16 @@ jobs:
             if [ -d "$item" ]; then
               # Find all weekly directories (e.g., 2023-10-09) inside the category folder
               for week_dir in "$item"/*/; do
-                # git ls-files returns 1 if a file is untracked. We check if the directory is untracked.
+                # git ls-files returns an error if a file is untracked. We check if the directory is untracked.
                 if ! git ls-files --error-unmatch "$week_dir" > /dev/null 2>&1; then
                   echo "New snapshot found: $week_dir. Preparing commit."
                   
                   # Add the new weekly directory to git
                   git add "$week_dir"
                   
-                  # Create a commit message
-                  COMMIT_MSG="feat(data): Add ${item} snapshot for week of ${week_dir#$item/}"
+                  # Create a commit message (remove trailing slash from dir name)
+                  dir_name=${week_dir%/}
+                  COMMIT_MSG="feat(data): Add ${item} snapshot for week of ${dir_name#$item/}"
                   git commit -m "$COMMIT_MSG"
                   
                   # Push this single commit
