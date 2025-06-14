@@ -1,10 +1,8 @@
 name: Weekly Hub Snapshots Update
 
 on:
-  # Run the workflow once a week on Sunday at 05:00 UTC
   schedule:
-    - cron: '0 5 * * 0'
-  # Allows you to run this workflow manually from the Actions tab
+    - cron: '0 5 * * 0' # Run once a week on Sunday at 05:00 UTC
   workflow_dispatch:
 
 jobs:
@@ -28,12 +26,12 @@ jobs:
 
       - name: Clone target repo without downloading LFS files
         run: |
-          # This is still CRITICAL to avoid downloading the large destination repo
+          # This is CRITICAL to avoid downloading the large destination repo
           GIT_LFS_SKIP_SMUDGE=1 git clone https://huggingface.co/datasets/hfmlsoc/hub_weekly_snapshots target_repo
 
       - name: Run snapshot generation script
         run: |
-          # This script now runs the new, more intelligent logic
+          # The new script uses a blobless git clone for history and the API for downloads
           python hub_download.py ./target_repo
 
       - name: Commit and push new snapshots
