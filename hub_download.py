@@ -2,6 +2,8 @@ import os
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta, timezone
+# CORRECTED: Import Union for backward-compatible type hints
+from typing import Union
 from huggingface_hub import HfApi, hf_hub_download
 from huggingface_hub.utils import HfHubHTTPError
 
@@ -10,7 +12,8 @@ SOURCE_REPO_ID = "cfahlgren1/hub-stats"
 DEST_REPO_ID = "hfmlsoc/hub_weekly_snapshots"
 ITEMS = ['spaces', 'models', 'datasets', 'daily_papers']
 
-def get_latest_snapshot_date(api: HfApi, item: str) -> datetime.date | None:
+# CORRECTED: Changed 'datetime.date | None' to 'Union[datetime.date, None]'
+def get_latest_snapshot_date(api: HfApi, item: str) -> Union[datetime.date, None]:
     """
     Inspects the destination repo to find the latest snapshot date for a given item
     by parsing the folder names (e.g., 'spaces/2023-10-16').
@@ -50,7 +53,6 @@ def process_item(api: HfApi, item: str, output_base_dir: Path):
 
     # 1. Get all commits for the source file
     try:
-        # CORRECTED API CALL: list_repo_commits is the correct method name
         source_commits = api.list_repo_commits(repo_id=SOURCE_REPO_ID, repo_type="dataset", path=file_path)
         if not source_commits:
             print(f"No commits found for file '{file_path}' in source repo. Skipping.")
