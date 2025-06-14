@@ -160,7 +160,7 @@ jobs:
                 api.upload_file(
                     path_or_fileobj='models_processed.parquet',
                     path_in_repo='models_processed.parquet',
-                    repo_id='evijit/OrgStats',
+                    repo_id='evijit/orgstats_daily_data',
                     repo_type='space',
                     token=os.environ['HF_TOKEN'],
                     commit_message=f'Automated data update - {time.strftime("%Y-%m-%d %H:%M:%S UTC")}'
