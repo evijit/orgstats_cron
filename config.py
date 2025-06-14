@@ -18,8 +18,7 @@ RAW_DATA_COLUMNS_TO_FETCH = [
     'pipeline_tag',
     'tags',
     'safetensors',
-    'lastModified', # Useful for tracking updates
-    'params'        # A direct parameter count if available
+    'lastModified'
 ]
 
 # --- Model Size Categories ---
