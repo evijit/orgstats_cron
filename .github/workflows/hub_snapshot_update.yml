@@ -22,23 +22,18 @@ jobs:
       - name: Install dependencies
         run: |
           pip install huggingface_hub
-          # Install git-lfs to be able to commit lfs files
           sudo apt-get update
           sudo apt-get install -y git-lfs
           git lfs install
 
       - name: Clone target repo without downloading LFS files
         run: |
-          # CRITICAL FIX:
-          # GIT_LFS_SKIP_SMUDGE=1 tells git-lfs to NOT download the large files.
-          # We get the file structure and git history, but the large files will be
-          # tiny pointers, saving massive amounts of disk space and time.
+          # This is still CRITICAL to avoid downloading the large destination repo
           GIT_LFS_SKIP_SMUDGE=1 git clone https://huggingface.co/datasets/hfmlsoc/hub_weekly_snapshots target_repo
 
       - name: Run snapshot generation script
         run: |
-          # This script will now run against a lightweight clone of the target repo.
-          # os.path.exists() will work correctly on the directory structure.
+          # This script now runs the new, more intelligent logic
           python hub_download.py ./target_repo
 
       - name: Commit and push new snapshots
@@ -49,7 +44,6 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # Add the token to the remote URL for the push operation
           git remote set-url origin https://huggingface-bot:${HF_TOKEN}@huggingface.co/datasets/hfmlsoc/hub_weekly_snapshots
 
           ITEMS="daily_papers datasets models spaces"
@@ -61,7 +55,7 @@ jobs:
                 if ! git ls-files --error-unmatch "$week_dir" > /dev/null 2>&1; then
                   echo "New snapshot found: $week_dir. Preparing commit."
                   
-                  # IMPORTANT: Track the new files with Git LFS
+                  # Track new files with Git LFS
                   git lfs track "${week_dir}*.parquet"
                   git add .gitattributes
                   git add "$week_dir"
