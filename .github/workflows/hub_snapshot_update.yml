@@ -1,9 +1,9 @@
-name: Daily Hub Snapshots Update
+name: Weekly Hub Snapshots Update
 
 on:
-  # Run the workflow every day at 05:00 UTC
+  # Run the workflow once a week on Sunday at 05:00 UTC
   schedule:
-    - cron: '0 5 * * *'
+    - cron: '0 5 * * 0'
   # Allows you to run this workflow manually from the Actions tab
   workflow_dispatch:
 
@@ -13,65 +13,51 @@ jobs:
     steps:
       - name: Checkout workflow repository
         uses: actions/checkout@v4
-        # This step checks out the repo containing this workflow file and the python script.
 
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: '3.10'
 
-      - name: Install Git LFS
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y git-lfs
-          git lfs install
+      - name: Install Python dependencies
+        run: pip install huggingface_hub
 
       - name: Clone target Hugging Face repository
         run: |
-          # CORRECTED: Cloning the public repo. No token is needed for this read-only operation.
-          # CORRECTED: Fixed the typo in the repository name from 'hflmsoc' to 'hfmlsoc'.
+          # Clone the destination repo to check for existing snapshots and add new ones
           git clone https://huggingface.co/datasets/hfmlsoc/hub_weekly_snapshots target_repo
 
-      - name: Run the snapshot generation script
+      - name: Run snapshot generation script
         run: |
-          # Runs the python script and tells it to place output files inside the cloned repo
+          # This script now uses the Hub API and doesn't clone the large source repo
           python hub_download.py ./target_repo
 
-      - name: Commit and push new snapshots one-by-one
+      - name: Commit and push new snapshots
         working-directory: ./target_repo
         env:
-          # Make the token available as an environment variable in this step
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          # Configure git user for the commits
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
-          # NEW: Add the token to the remote URL ONLY for the push operation.
-          # This is more secure and explicit than using it for the initial clone.
+          # Add the token to the remote URL for the push operation
           git remote set-url origin https://huggingface-bot:${HF_TOKEN}@huggingface.co/datasets/hfmlsoc/hub_weekly_snapshots
 
-          # List of categories the python script creates
           ITEMS="daily_papers datasets models spaces"
           PUSH_COUNT=0
 
           for item in $ITEMS; do
             if [ -d "$item" ]; then
-              # Find all weekly directories (e.g., 2023-10-09) inside the category folder
               for week_dir in "$item"/*/; do
-                # git ls-files returns an error if a file is untracked. We check if the directory is untracked.
+                # Check if the directory is untracked by git
                 if ! git ls-files --error-unmatch "$week_dir" > /dev/null 2>&1; then
                   echo "New snapshot found: $week_dir. Preparing commit."
-                  
-                  # Add the new weekly directory to git
                   git add "$week_dir"
                   
-                  # Create a commit message (remove trailing slash from dir name)
                   dir_name=${week_dir%/}
                   COMMIT_MSG="feat(data): Add ${item} snapshot for week of ${dir_name#$item/}"
                   git commit -m "$COMMIT_MSG"
                   
-                  # Push this single commit
                   echo "Pushing commit for $week_dir"
                   git push
                   
