@@ -1,4 +1,4 @@
-# --- config.py ---
+# --- config.py (UPDATED) ---
 """Configuration file containing all constants and settings."""
 
 import pandas as pd
@@ -6,6 +6,21 @@ import pandas as pd
 # --- File Paths ---
 PROCESSED_PARQUET_FILE_PATH = "models_processed.parquet"
 HF_PARQUET_URL = 'https://huggingface.co/datasets/cfahlgren1/hub-stats/resolve/main/models.parquet'
+
+# --- NEW: Column Selection for Raw Data Fetching ---
+# This is the single most important optimization. By selecting only the columns
+# we need, we drastically reduce download size and time.
+RAW_DATA_COLUMNS_TO_FETCH = [
+    'id',
+    'downloads',
+    'downloadsAllTime',
+    'likes',
+    'pipeline_tag',
+    'tags',
+    'safetensors',
+    'lastModified', # Useful for tracking updates
+    'params'        # A direct parameter count if available
+]
 
 # --- Model Size Categories ---
 MODEL_SIZE_RANGES = {
@@ -41,6 +56,7 @@ FINAL_EXPECTED_COLUMNS = [
 ]
 
 # --- Column Setup Configuration ---
+# Note: This list should be a subset of RAW_DATA_COLUMNS_TO_FETCH
 EXPECTED_COLUMNS_SETUP = {
     'id': str, 
     'downloads': float, 
