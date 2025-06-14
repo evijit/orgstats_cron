@@ -94,8 +94,9 @@ def process_item(api: HfApi, item: str, output_base_dir: Path):
             print(f"New snapshot needed for week of {current_date}. Using commit {weekly_commit_hex[:8]}")
             weekly_folder = dest_dir / str(current_date)
             try:
+                # CLEANED: Removed the deprecated 'local_dir_use_symlinks' parameter
                 hf_hub_download(repo_id=SOURCE_REPO_ID, filename=file_path, repo_type="dataset",
-                                revision=weekly_commit_hex, local_dir=weekly_folder, local_dir_use_symlinks=False)
+                                revision=weekly_commit_hex, local_dir=weekly_folder)
                 print(f"  -> Successfully downloaded snapshot to {weekly_folder}")
             except HfHubHTTPError as e:
                 print(f"  -> ERROR downloading file from commit {weekly_commit_hex[:8]}: {e}")
