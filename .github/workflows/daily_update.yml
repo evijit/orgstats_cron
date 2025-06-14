@@ -57,7 +57,7 @@ jobs:
           echo "🔄 Pipeline Execution (Attempt $attempt)"
           echo "======================================"
           # Run with timeout and capture output, returning the python script's exit code
-          timeout 3600s python main.py 2>&1 | while IFS= read -r line; do
+          timeout 3600s python -u main.py 2>&1 | while IFS= read -r line; do
             echo "$(date -u '+%H:%M:%S'): $line"
           done
           return ${PIPESTATUS[0]}

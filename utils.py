@@ -12,11 +12,15 @@ from config import MODEL_SIZE_RANGES
 def log_progress(message, start_time=None):
     """Enhanced logging with timestamps and elapsed time."""
     timestamp = pd.Timestamp.now().strftime('%Y-%m-%d %H:%M:%S')
+    log_message = f"[{timestamp}] {message}"
+    
     if start_time:
         elapsed = time.time() - start_time
-        print(f"[{timestamp}] {message} (Elapsed: {elapsed:.2f}s)")
-    else:
-        print(f"[{timestamp}] {message}")
+        log_message += f" (Elapsed: {elapsed:.2f}s)"
+        
+    # --- THIS IS THE CRITICAL FIX ---
+    # Add flush=True to ensure the message is printed immediately in the CI/CD log.
+    print(log_message, flush=True)
     
 def extract_model_file_size_gb(safetensors_data):
     """Extract model file size in GB from safetensors data."""
