@@ -1,21 +1,15 @@
-name: Daily HF Models Data Update (Modular)
+name: Daily HF Data Update (Models & Datasets)
 
 on:
   schedule:
     - cron: '0 2 * * *'  # Run at 2 AM UTC daily
   workflow_dispatch:
 
-env:
-  ACTIONS_RUNNER_DEBUG: true
-  ACTIONS_STEP_DEBUG: true
-
 jobs:
-  update-data:
+  update-models-data:
+    name: "Update Daily Models Data"
     runs-on: ubuntu-latest
     timeout-minutes: 90
-    strategy:
-      fail-fast: false
-
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -30,178 +24,80 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    # --- NEW, FAST TESTING STEP ---
-    # This step runs the entire pipeline logic on a small subset of data.
-    # It provides fast feedback and validation before the main job.
-    - name: Test pipeline logic on a small data subset
+    - name: Test Models pipeline on a small data subset
       env:
-        TEST_DATA_LIMIT: 5000 # Fetch only 5000 rows for the test
-      run: |
-        echo "🧪 Running fast integration test on a small subset of data..."
-        python test_pipeline.py
-        echo "✅ Pipeline logic test passed!"
+        TEST_DATA_LIMIT: 5000
+      run: python test_pipeline.py
 
-    # --- MAIN PROCESSING STEP ---
-    # This step runs on the full dataset only after the fast test passes.
-    - name: Run main processing pipeline (full dataset)
+    - name: Run Models processing pipeline (full dataset)
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: timeout 3600s python -u main.py
+
+    - name: Verify Models output file
+      id: verify_models
       run: |
-        echo "=== Starting Main Data Processing Pipeline (Full Dataset) ==="
-        echo "Start time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-
-        # Function to run the main pipeline with timeout and monitoring
-        run_main_pipeline() {
-          local attempt=$1
-          echo ""
-          echo "🔄 Pipeline Execution (Attempt $attempt)"
-          echo "======================================"
-          # Run with timeout and capture output, returning the python script's exit code
-          timeout 3600s python -u main.py 2>&1 | while IFS= read -r line; do
-            echo "$(date -u '+%H:%M:%S'): $line"
-          done
-          return ${PIPESTATUS[0]}
-        }
-
-        # Execute pipeline with retry logic
-        max_attempts=2
-        attempt=1
-        while [ $attempt -le $max_attempts ]; do
-          echo "🚀 Starting pipeline attempt $attempt of $max_attempts"
-          if run_main_pipeline $attempt; then
-            echo "✅ Pipeline completed successfully on attempt $attempt!"
-            echo "Completion time: $(date -u '+%Y-%m-%d %H:%M:%S UTC')"
-            break
-          else
-            exit_code=$?
-            echo "❌ Pipeline failed on attempt $attempt (exit code: $exit_code)"
-            if [ $attempt -eq $max_attempts ]; then
-              echo "💥 All pipeline attempts exhausted"
-              exit $exit_code
-            else
-              echo "⏳ Preparing for retry..."
-              sleep 60
-              attempt=$((attempt + 1))
-            fi
-          fi
-        done
-
-    - name: Detailed output verification
-      id: detailed_verification
-      run: |
-        echo "=== Detailed Output Verification ==="
-        if [ ! -f "models_processed.parquet" ]; then
-          echo "❌ Output file missing"
-          echo "has_changes=false" >> $GITHUB_OUTPUT
-          exit 1
-        fi
-        
+        if [ ! -f "models_processed.parquet" ]; then exit 1; fi
         file_size_mb=$(($(stat -c%s "models_processed.parquet") / 1024 / 1024))
-        echo "✅ Output file exists: models_processed.parquet (${file_size_mb} MB)"
+        if [ $file_size_mb -lt 2 ]; then exit 1; fi
+        echo "file_path=models_processed.parquet" >> $GITHUB_OUTPUT
+        echo "has_changes=true" >> $GITHUB_OUTPUT
 
-        if [ $file_size_mb -lt 2 ]; then
-          echo "❌ File size too small (${file_size_mb} MB)"
-          echo "has_changes=false" >> $GITHUB_OUTPUT
-          exit 1
-        fi
-
-        # Comprehensive validation script
-        validation_result=$(python - <<EOF
-        import pandas as pd, sys
-        try:
-            print('--- Comprehensive Validation ---')
-            df = pd.read_parquet('models_processed.parquet')
-            print(f'📊 Shape: {df.shape}')
-            
-            expected_cols = ['id', 'downloads', 'likes', 'params', 'organization', 'has_robot', 'size_category']
-            missing = [col for col in expected_cols if col not in df.columns]
-            if missing:
-                raise AssertionError(f"Missing critical columns: {missing}")
-            print('✅ All critical columns present.')
-            
-            if len(df) < 100000:
-                print(f"⚠️  Dataset smaller than expected: {len(df):,} rows")
-            else:
-                print(f'✅ Dataset size acceptable: {len(df):,} rows.')
-            
-            print('🎉 Validation successful!')
-        except Exception as e:
-            print(f'❌ Validation failed: {e}', file=sys.stderr)
-            import traceback
-            traceback.print_exc()
-            sys.exit(1)
-        EOF
-        )
-
-        validation_exit_code=$?
-        echo "${validation_result}"
-        if [ $validation_exit_code -eq 0 ]; then
-          echo "has_changes=true" >> $GITHUB_OUTPUT
-          echo "file_size_mb=${file_size_mb}" >> $GITHUB_OUTPUT
-        else
-          echo "has_changes=false" >> $GITHUB_OUTPUT
-          exit 1
-        fi
-
-    - name: Upload to Hugging Face Space
-      if: steps.detailed_verification.outputs.has_changes == 'true'
+    - name: Upload Models data to Hugging Face
+      if: steps.verify_models.outputs.has_changes == 'true'
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
-        echo "=== Uploading to Hugging Face Space ==="
-        python - <<EOF
-        from huggingface_hub import HfApi
-        import os, sys, time
-        
-        for attempt in range(3):
-            try:
-                print(f"📤 Upload attempt {attempt + 1}...")
-                api = HfApi()
-                api.upload_file(
-                    path_or_fileobj='models_processed.parquet',
-                    path_in_repo='models_processed.parquet',
-                    repo_id='evijit/modelverse_daily_data',
-                    repo_type='dataset',
-                    token=os.environ['HF_TOKEN'],
-                    commit_message=f'Automated data update - {time.strftime("%Y-%m-%d %H:%M:%S UTC")}'
-                )
-                print('✅ Upload successful!')
-                sys.exit(0)
-            except Exception as e:
-                print(f"❌ Upload attempt {attempt + 1} failed: {e}")
-                if attempt < 2:
-                    print("Retrying in 45 seconds...")
-                    time.sleep(45)
-                else:
-                    sys.exit(1)
-        EOF
+        pip install huggingface_hub
+        huggingface-cli upload evijit/modelverse_daily_data \
+          ${{ steps.verify_models.outputs.file_path }} \
+          ${{ steps.verify_models.outputs.file_path }} \
+          --repo-type dataset --commit-message "Automated models data update" --token $HF_TOKEN
 
-    - name: Create workflow summary
-      if: always()
-      run: |
-        if [[ "${{ job.status }}" == "success" ]]; then
-          echo "### 🎉 SUCCESS: Data Processing Completed" >> $GITHUB_STEP_SUMMARY
-          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| 📊 Output File Size | ${{ steps.detailed_verification.outputs.file_size_mb }} MB |" >> $GITHUB_STEP_SUMMARY
-          echo "| ⏱️ Total Execution Time | $SECONDS seconds |" >> $GITHUB_STEP_SUMMARY
-          echo "" >> $GITHUB_STEP_SUMMARY
-          echo "✅ **Data successfully uploaded to Hugging Face Space: evijit/OrgStats**" >> $GITHUB_STEP_SUMMARY
-        else
-          echo "### ❌ FAILURE: Data Processing Failed" >> $GITHUB_STEP_SUMMARY
-          echo "The data processing pipeline did not complete successfully." >> $GITHUB_STEP_SUMMARY
-          echo "| Metric | Value |" >> $GITHUB_STEP_SUMMARY
-          echo "|--------|-------|" >> $GITHUB_STEP_SUMMARY
-          echo "| ⏱️ Failed After | $SECONDS seconds |" >> $GITHUB_STEP_SUMMARY
-        fi
-        echo "" >> $GITHUB_STEP_SUMMARY
-        echo "*Run [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})*" >> $GITHUB_STEP_SUMMARY
+  update-datasets-data:
+    name: "Update Daily Datasets Data"
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
 
-    - name: Upload build artifacts
-      if: always()
-      uses: actions/upload-artifact@v4
+    - name: Set up Python
+      uses: actions/setup-python@v4
       with:
-        name: pipeline-outputs-${{ github.run_number }}
-        path: models_processed.parquet
-        retention-days: 7
-        if-no-files-found: warn
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Test Datasets pipeline on a small data subset
+      env:
+        TEST_DATA_LIMIT: 5000
+      run: python test_pipeline_datasets.py
+
+    - name: Run Datasets processing pipeline (full dataset)
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: timeout 2400s python -u main_datasets.py
+
+    - name: Verify Datasets output file
+      id: verify_datasets
+      run: |
+        if [ ! -f "datasets_processed.parquet" ]; then exit 1; fi
+        file_size_mb=$(($(stat -c%s "datasets_processed.parquet") / 1024 / 1024))
+        if [ $file_size_mb -lt 1 ]; then exit 1; fi
+        echo "file_path=datasets_processed.parquet" >> $GITHUB_OUTPUT
+        echo "has_changes=true" >> $GITHUB_OUTPUT
+
+    - name: Upload Datasets data to Hugging Face
+      if: steps.verify_datasets.outputs.has_changes == 'true'
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: |
+        pip install huggingface_hub
+        huggingface-cli upload evijit/dataverse_daily_data \
+          ${{ steps.verify_datasets.outputs.file_path }} \
+          ${{ steps.verify_datasets.outputs.file_path }} \
+          --repo-type dataset --commit-message "Automated datasets data update" --token $HF_TOKEN
