@@ -45,30 +45,23 @@ jobs:
           ITEM_TO_CHECK="models"
           START_DATE_STR="${{ github.event.inputs.start_date }}"
           END_DATE_STR="${{ github.event.inputs.end_date }}"
-          # A reasonable minimum file size to ensure it's not an LFS pointer (100KB)
           MIN_SIZE_BYTES=102400
 
           echo "--- Verifying snapshot integrity for '$ITEM_TO_CHECK' from $START_DATE_STR to $END_DATE_STR ---"
 
-          # Use GNU date, which is standard on ubuntu-latest runners
           current_date_ts=$(date -d "$START_DATE_STR" +%s)
           end_date_ts=$(date -d "$END_DATE_STR" +%s)
 
           FILE_PATHS_TO_CHECK=""
           while [ "$current_date_ts" -le "$end_date_ts" ]; do
             current_date_str=$(date -d "@$current_date_ts" +%Y-%m-%d)
-            # Adjust the file path to match the expected output of hub_download.py
             file_path="${ITEM_TO_CHECK}/${current_date_str}/${ITEM_TO_CHECK}.parquet"
-            
             if [ -f "$file_path" ]; then
               FILE_PATHS_TO_CHECK="${FILE_PATHS_TO_CHECK}${file_path}\n"
             fi
-            
-            # Move to the next week
             current_date_ts=$(date -d "$current_date_str + 7 days" +%s)
           done
 
-          # Check if any files were found in the date range
           if [ -z "$FILE_PATHS_TO_CHECK" ]; then
             echo "Verification FAILED: No snapshot files found in the specified date range. Aborting."
             exit 1
@@ -78,7 +71,8 @@ jobs:
           echo -e "$FILE_PATHS_TO_CHECK"
 
           # Get a list of the file sizes from the filtered list of paths
-          FILE_SIZES=$(echo -e "$FILE_PATHS_TO_CHECK" | xargs -d '\n' stat -c %s)
+          # THIS LINE IS THE FIX: Added -r flag to xargs
+          FILE_SIZES=$(echo -e "$FILE_PATHS_TO_CHECK" | xargs -r -d '\n' stat -c %s)
 
           echo "Corresponding file sizes (in bytes):"
           echo "$FILE_SIZES"
@@ -94,7 +88,7 @@ jobs:
           if [ "$TINY_FILES_COUNT" -gt 0 ]; then
             echo "---"
             echo "Verification FAILED: Found $TINY_FILES_COUNT file(s) smaller than $MIN_SIZE_BYTES bytes."
-            echo "This indicates that some files are still Git LFS pointers instead of the actual data. Aborting."
+            echo "This indicates that some files are still Git LFS pointers. Aborting."
             echo "---"
             exit 1
           fi
@@ -128,8 +122,7 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           
           git remote set-url origin https://huggingface-bot:${HF_TOKEN}@huggingface.co/datasets/hfmlsoc/hub_weekly_snapshots
-
-          # Only check for changes in the models directory as it was the one with the issue
+          
           ITEM_TO_COMMIT="models"
           
           if git status --porcelain -- "$ITEM_TO_COMMIT" | grep -qE '^\?\?| M'; then
