@@ -33,7 +33,6 @@ jobs:
 
       - name: Clone target repo without downloading LFS files
         run: |
-          # This is CRITICAL to avoid downloading the large destination repo
           GIT_LFS_SKIP_SMUDGE=1 git clone https://huggingface.co/datasets/hfmlsoc/hub_weekly_snapshots target_repo
 
       - name: Run backfill snapshot generation
@@ -44,42 +43,81 @@ jobs:
         working-directory: ./target_repo
         run: |
           ITEM_TO_CHECK="models"
-          
-          echo "--- Verifying snapshot integrity for '$ITEM_TO_CHECK' ---"
-          
-          # Find all the Parquet files generated for the item
-          FILE_LIST=$(find $ITEM_TO_CHECK -type f -name "*.parquet")
-          
-          # Check if there are multiple files to compare
-          if [ $(echo "$FILE_LIST" | wc -l) -le 1 ]; then
-            echo "Only one or zero snapshot files found for '$ITEM_TO_CHECK'. No comparison needed."
-            exit 0
+          START_DATE_STR="${{ github.event.inputs.start_date }}"
+          END_DATE_STR="${{ github.event.inputs.end_date }}"
+          # A reasonable minimum file size to ensure it's not an LFS pointer (100KB)
+          MIN_SIZE_BYTES=102400
+
+          echo "--- Verifying snapshot integrity for '$ITEM_TO_CHECK' from $START_DATE_STR to $END_DATE_STR ---"
+
+          # Use GNU date, which is standard on ubuntu-latest runners
+          current_date_ts=$(date -d "$START_DATE_STR" +%s)
+          end_date_ts=$(date -d "$END_DATE_STR" +%s)
+
+          FILE_PATHS_TO_CHECK=""
+          while [ "$current_date_ts" -le "$end_date_ts" ]; do
+            current_date_str=$(date -d "@$current_date_ts" +%Y-%m-%d)
+            # Adjust the file path to match the expected output of hub_download.py
+            file_path="${ITEM_TO_CHECK}/${current_date_str}/${ITEM_TO_CHECK}.parquet"
+            
+            if [ -f "$file_path" ]; then
+              FILE_PATHS_TO_CHECK="${FILE_PATHS_TO_CHECK}${file_path}\n"
+            fi
+            
+            # Move to the next week
+            current_date_ts=$(date -d "$current_date_str + 7 days" +%s)
+          done
+
+          # Check if any files were found in the date range
+          if [ -z "$FILE_PATHS_TO_CHECK" ]; then
+            echo "Verification FAILED: No snapshot files found in the specified date range. Aborting."
+            exit 1
           fi
-          
+
           echo "Files to be verified:"
-          echo "$FILE_LIST"
-          
-          # Get a list of the file sizes
-          FILE_SIZES=$(stat -c %s $FILE_LIST)
-          
-          echo "Corresponding file sizes:"
+          echo -e "$FILE_PATHS_TO_CHECK"
+
+          # Get a list of the file sizes from the filtered list of paths
+          FILE_SIZES=$(echo -e "$FILE_PATHS_TO_CHECK" | xargs -d '\n' stat -c %s)
+
+          echo "Corresponding file sizes (in bytes):"
           echo "$FILE_SIZES"
-          
-          # Count the number of unique file sizes
-          UNIQUE_SIZES_COUNT=$(echo "$FILE_SIZES" | sort | uniq | wc -l)
-          
-          if [ "$UNIQUE_SIZES_COUNT" -eq 1 ]; then
+
+          # 1. Check for LFS pointers (files that are too small)
+          TINY_FILES_COUNT=0
+          for size in $FILE_SIZES; do
+            if [ "$size" -lt "$MIN_SIZE_BYTES" ]; then
+              TINY_FILES_COUNT=$((TINY_FILES_COUNT + 1))
+            fi
+          done
+
+          if [ "$TINY_FILES_COUNT" -gt 0 ]; then
             echo "---"
-            echo "Verification FAILED: All snapshot files for '$ITEM_TO_CHECK' have the exact same size."
-            echo "This indicates the backfill did not fix the data duplication issue. Aborting push."
+            echo "Verification FAILED: Found $TINY_FILES_COUNT file(s) smaller than $MIN_SIZE_BYTES bytes."
+            echo "This indicates that some files are still Git LFS pointers instead of the actual data. Aborting."
             echo "---"
             exit 1
-          else
-            echo "---"
-            echo "Verification PASSED: Snapshot file sizes are varied as expected."
-            echo "The backfill appears to be successful. Proceeding to commit and push."
-            echo "---"
           fi
+          echo "Verification PASSED: All files are larger than the minimum threshold."
+
+          # 2. Check if all file sizes are identical
+          if [ $(echo "$FILE_SIZES" | wc -l) -gt 1 ]; then
+            UNIQUE_SIZES_COUNT=$(echo "$FILE_SIZES" | sort | uniq | wc -l)
+            if [ "$UNIQUE_SIZES_COUNT" -eq 1 ]; then
+              echo "---"
+              echo "Verification FAILED: All backfilled snapshot files have the exact same size."
+              echo "This indicates the data duplication issue was not resolved. Aborting."
+              echo "---"
+              exit 1
+            fi
+            echo "Verification PASSED: Snapshot file sizes are varied as expected."
+          else
+            echo "Only one snapshot file found in range, skipping uniqueness check."
+          fi
+
+          echo "---"
+          echo "All verification checks passed. The backfill appears successful. Proceeding."
+          echo "---"
 
       - name: Commit and push new snapshots
         working-directory: ./target_repo
@@ -91,34 +129,21 @@ jobs:
           
           git remote set-url origin https://huggingface-bot:${HF_TOKEN}@huggingface.co/datasets/hfmlsoc/hub_weekly_snapshots
 
-          ITEMS="daily_papers datasets models spaces"
-          PUSH_COUNT=0
-
-          for item in $ITEMS; do
-            # Use git status to find new or modified files in the item directory
-            if git status --porcelain -- "$item" | grep -qE '^\?\?| M'; then
-              echo "Backfilled snapshots found for $item. Preparing commit."
-              
-              # Track new/modified files with Git LFS
-              git lfs track "${item}/**/*.parquet"
-              git add .gitattributes
-              git add "$item"
-              
-              COMMIT_MSG="fix(data): Backfill ${item} snapshots from ${{ github.event.inputs.start_date }} to ${{ github.event.inputs.end_date }}"
-              # Check if there's anything to commit before attempting
-              if git diff --cached --quiet; then
-                echo "No changes to commit for $item."
-              else
-                git commit -m "$COMMIT_MSG"
-                echo "Pushing commit for $item"
-                git push
-                PUSH_COUNT=$((PUSH_COUNT + 1))
-              fi
-            fi
-          done
-
-          if [ $PUSH_COUNT -eq 0 ]; then
-            echo "No new weekly snapshots to push."
+          # Only check for changes in the models directory as it was the one with the issue
+          ITEM_TO_COMMIT="models"
+          
+          if git status --porcelain -- "$ITEM_TO_COMMIT" | grep -qE '^\?\?| M'; then
+            echo "Backfilled snapshots found for $ITEM_TO_COMMIT. Preparing commit."
+            
+            git lfs track "${ITEM_TO_COMMIT}/**/*.parquet"
+            git add .gitattributes
+            git add "$ITEM_TO_COMMIT"
+            
+            COMMIT_MSG="fix(data): Backfill ${ITEM_TO_COMMIT} snapshots from ${{ github.event.inputs.start_date }} to ${{ github.event.inputs.end_date }}"
+            git commit -m "$COMMIT_MSG"
+            
+            echo "Pushing commit for $ITEM_TO_COMMIT"
+            git push
           else
-            echo "Successfully pushed $PUSH_COUNT new snapshot commit(s)."
+            echo "No new changes detected in the $ITEM_TO_COMMIT directory to push."
           fi
