@@ -49,30 +49,35 @@ jobs:
 
           echo "--- Verifying snapshot integrity for '$ITEM_TO_CHECK' from $START_DATE_STR to $END_DATE_STR ---"
 
+          # Use a bash array to reliably store file paths
+          declare -a file_paths_to_check=()
+          
           current_date_ts=$(date -d "$START_DATE_STR" +%s)
           end_date_ts=$(date -d "$END_DATE_STR" +%s)
 
-          FILE_PATHS_TO_CHECK=""
           while [ "$current_date_ts" -le "$end_date_ts" ]; do
             current_date_str=$(date -d "@$current_date_ts" +%Y-%m-%d)
             file_path="${ITEM_TO_CHECK}/${current_date_str}/${ITEM_TO_CHECK}.parquet"
             if [ -f "$file_path" ]; then
-              FILE_PATHS_TO_CHECK="${FILE_PATHS_TO_CHECK}${file_path}\n"
+              # Add the found file path to the array
+              file_paths_to_check+=("$file_path")
             fi
+            # Move to the next week
             current_date_ts=$(date -d "$current_date_str + 7 days" +%s)
           done
 
-          if [ -z "$FILE_PATHS_TO_CHECK" ]; then
+          # Check if the array is empty
+          if [ ${#file_paths_to_check[@]} -eq 0 ]; then
             echo "Verification FAILED: No snapshot files found in the specified date range. Aborting."
             exit 1
           fi
 
           echo "Files to be verified:"
-          echo -e "$FILE_PATHS_TO_CHECK"
+          # Print the array contents for logging
+          printf "%s\n" "${file_paths_to_check[@]}"
 
-          # Get a list of the file sizes from the filtered list of paths
-          # THIS LINE IS THE FIX: Added -r flag to xargs
-          FILE_SIZES=$(echo -e "$FILE_PATHS_TO_CHECK" | xargs -r -d '\n' stat -c %s)
+          # Get file sizes by passing the array directly to stat. This is the robust fix.
+          FILE_SIZES=$(stat -c %s "${file_paths_to_check[@]}")
 
           echo "Corresponding file sizes (in bytes):"
           echo "$FILE_SIZES"
@@ -95,8 +100,8 @@ jobs:
           echo "Verification PASSED: All files are larger than the minimum threshold."
 
           # 2. Check if all file sizes are identical
-          if [ $(echo "$FILE_SIZES" | wc -l) -gt 1 ]; then
-            UNIQUE_SIZES_COUNT=$(echo "$FILE_SIZES" | sort | uniq | wc -l)
+          if [ ${#file_paths_to_check[@]} -gt 1 ]; then
+            UNIQUE_SIZES_COUNT=$(echo "$FILE_SIZES" | sort -u | wc -l)
             if [ "$UNIQUE_SIZES_COUNT" -eq 1 ]; then
               echo "---"
               echo "Verification FAILED: All backfilled snapshot files have the exact same size."
