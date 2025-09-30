@@ -18,7 +18,7 @@ This repository contains a modular data processing pipeline that fetches, proces
 
 ## 🚀 Pipeline Overview
 
-The pipeline consists of 6 main steps:
+The pipeline consists of 6 steps:
 
 1. **Data Fetching** (`data_fetcher.py`)
    - Downloads raw model data from HuggingFace
