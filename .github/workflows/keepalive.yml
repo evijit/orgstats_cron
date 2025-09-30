@@ -1,21 +1,16 @@
-name: Github Action with a cronjob trigger
+name: Keepalive Workflow
 on:
   schedule:
     - cron: "0 0 * * *"
+permissions:
+  actions: write
 jobs:
-  main-job:
-    name: Main Job
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      # - step1
-      # - step 2
-      # - Step N
-  keepalive-job:
+  cronjob-based-github-action:
     name: Keepalive Workflow
     runs-on: ubuntu-latest
-    permissions:
-      actions: write
     steps:
       - uses: actions/checkout@v4
       - uses: gautamkrishnar/keepalive-workflow@v2
+        with:
+          workflow_files: "daily_update.yml, hub_snapshot_update.yml"
+          time_elapsed: "0"
