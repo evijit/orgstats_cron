@@ -51,10 +51,10 @@ def validate_raw_data(df_raw):
     """Perform validation on raw papers data."""
     log_progress("🔍 Validating raw papers data quality...")
     
-    if 'id' not in df_raw.columns:
-        raise ValueError("Critical 'id' column is missing from fetched papers data.")
+    if 'paper_id' not in df_raw.columns:
+        raise ValueError("Critical 'paper_id' column is missing from fetched papers data.")
     
-    log_progress(f"   - Duplicate IDs: {df_raw['id'].duplicated().sum():,}")
+    log_progress(f"   - Duplicate IDs: {df_raw['paper_id'].duplicated().sum():,}")
     
     # Check paper_ai_keywords column
     if 'paper_ai_keywords' in df_raw.columns:

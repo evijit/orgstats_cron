@@ -46,7 +46,8 @@ def run_test_pipeline():
             log_progress("\nSample classified papers:")
             sample = df[df['primary_category'].notna()].head(3)
             for idx, row in sample.iterrows():
-                log_progress(f"  Paper: {row['id']}")
+                log_progress(f"  Paper: {row['paper_id']}")
+                log_progress(f"    Title: {row.get('paper_title', 'N/A')}")
                 log_progress(f"    Category: {row['primary_category']}")
                 log_progress(f"    Subcategory: {row['primary_subcategory']}")
                 log_progress(f"    Topic: {row['primary_topic']}")

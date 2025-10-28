@@ -249,28 +249,34 @@ def setup_initial_dataframe(df_raw, data_download_timestamp):
     for col_name, target_dtype in EXPECTED_COLUMNS_SETUP.items():
         if col_name in df_raw.columns:
             df[col_name] = df_raw[col_name]
+            # Only convert numeric types, keep everything else as-is
             if target_dtype == float:
                 df[col_name] = pd.to_numeric(df[col_name], errors='coerce').fillna(0.0)
-            elif target_dtype == str:
-                df[col_name] = df[col_name].astype(str).fillna('')
         else:
             log_progress(f"     Column {col_name} missing, creating default values")
-            if col_name in ['downloads', 'downloadsAllTime', 'likes']:
+            if target_dtype == float:
                 df[col_name] = 0.0
-            elif col_name == 'tags' or col_name == 'paper_ai_keywords':
-                df[col_name] = pd.Series([[] for _ in range(len(df_raw))])
-            elif col_name == 'id':
-                raise ValueError("'id' column is required but missing from source data")
+            else:
+                df[col_name] = None
 
     df['data_download_timestamp'] = data_download_timestamp
-    validate_dataframe_structure(df, list(EXPECTED_COLUMNS_SETUP.keys()))
+    
+    # Validate critical columns
+    if 'paper_id' not in df.columns or df['paper_id'].isna().all():
+        raise ValueError("'paper_id' column is required but missing or empty")
+    
+    log_progress(f"✅ DataFrame setup completed with {len(df.columns)} columns")
     log_memory_usage()
     return df
 
 def enrich_data(df):
-    """Add organization column to papers data."""
-    log_progress("✨ Enriching papers data with organization...")
-    df['organization'] = df['id'].apply(extract_org_from_id)
+    """Papers data already has organization column, so just validate it exists."""
+    log_progress("✨ Validating papers data organization column...")
+    
+    if 'organization' not in df.columns:
+        log_progress("   ⚠️  Organization column missing, will use paper_id to extract org")
+        df['organization'] = df['paper_id'].apply(extract_org_from_id)
+    
     org_count = df['organization'].nunique()
     log_progress(f"   Found {org_count:,} unique organizations.")
     log_memory_usage()
@@ -339,15 +345,16 @@ if __name__ == "__main__":
     
     # Create sample data
     raw_data = {
-        'id': ['org1/paper1', 'org2/paper2', 'unaffiliated_paper3'],
+        'paper_id': ['org1/paper1', 'org2/paper2', 'unaffiliated_paper3'],
+        'paper_title': ['Deep Learning Paper', 'Computer Vision Study', 'NLP Research'],
         'paper_ai_keywords': [
             ['neural networks', 'deep learning'],
             ['computer vision', 'object detection'],
             ['natural language processing']
         ],
-        'downloads': [100, 200, 300],
-        'likes': [10, 20, 30],
-        'tags': [['tag1'], ['tag2'], ['tag3']]
+        'paper_upvotes': [100, 200, 300],
+        'paper_publishedAt': ['2025-01-01', '2025-01-02', '2025-01-03'],
+        'organization': ['org1', 'org2', 'unaffiliated']
     }
     df_raw_test = pd.DataFrame(raw_data)
     timestamp_test = pd.Timestamp.now(tz='UTC')
@@ -359,7 +366,7 @@ if __name__ == "__main__":
         
         log_progress("✅ Data processor test successful")
         print("\n--- Final Test DataFrame ---")
-        print(df_test[['id', 'organization', 'primary_category', 'primary_subcategory', 'primary_topic']].to_string())
+        print(df_test[['paper_id', 'organization', 'primary_category', 'primary_subcategory', 'primary_topic']].to_string())
         print("--------------------------\n")
 
     except Exception as e:

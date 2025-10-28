@@ -4,35 +4,55 @@
 # Data source
 HF_PARQUET_URL = "https://huggingface.co/datasets/cfahlgren1/hub-stats/resolve/main/daily_papers.parquet"
 
-# Columns to fetch from source
+# Columns to fetch from source - fetch all available columns
 RAW_DATA_COLUMNS_TO_FETCH = [
-    'id',
+    'publishedAt',
+    'title',
+    'summary',
+    'thumbnail',
+    'numComments',
+    'submittedBy',
+    'organization',
+    'isAuthorParticipating',
+    'mediaUrls',
+    'paper_id',
+    'paper_authors',
+    'paper_publishedAt',
+    'paper_submittedOnDailyAt',
+    'paper_title',
+    'paper_summary',
+    'paper_upvotes',
+    'paper_discussionId',
+    'paper_ai_summary',
     'paper_ai_keywords',
-    'downloads',
-    'downloadsAllTime',
-    'likes',
-    'tags'
+    'paper_submittedOnDailyBy._id',
+    'paper_submittedOnDailyBy.avatarUrl',
+    'paper_submittedOnDailyBy.isPro',
+    'paper_submittedOnDailyBy.fullname',
+    'paper_submittedOnDailyBy.user',
+    'paper_submittedOnDailyBy.type',
+    'paper_organization._id',
+    'paper_organization.name',
+    'paper_organization.fullname',
+    'paper_organization.avatar',
+    'paper_githubRepo',
+    'paper_githubStars',
+    'paper_mediaUrls',
+    'paper_projectPage',
+    'paper_withdrawnAt'
 ]
 
-# Expected columns after initial setup
-EXPECTED_COLUMNS_SETUP = {
-    'id': str,
-    'paper_ai_keywords': object,  # List of keywords
-    'downloads': float,
-    'downloadsAllTime': float,
-    'likes': float,
-    'tags': object
-}
+# Expected columns after initial setup (keep all as object for flexibility)
+EXPECTED_COLUMNS_SETUP = {col: object for col in RAW_DATA_COLUMNS_TO_FETCH}
+# Override specific columns that need numeric types
+EXPECTED_COLUMNS_SETUP.update({
+    'paper_upvotes': float,
+    'numComments': float,
+    'paper_githubStars': float,
+})
 
-# Final expected columns in output
-FINAL_EXPECTED_COLUMNS = [
-    'id',
-    'paper_ai_keywords',
-    'downloads',
-    'downloadsAllTime',
-    'likes',
-    'tags',
-    'organization',
+# Final expected columns in output (all original columns plus taxonomy columns)
+FINAL_EXPECTED_COLUMNS = RAW_DATA_COLUMNS_TO_FETCH + [
     'data_download_timestamp',
     'taxonomy_categories',
     'taxonomy_subcategories',
