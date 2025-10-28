@@ -156,41 +156,36 @@ def semantic_map_keywords(keywords, similarity_threshold=SIMILARITY_THRESHOLD):
     nlp = load_spacy_model()
     taxonomy_embeddings = build_taxonomy_embeddings()
     
-    # Handle None, NaN, NA, or empty values
-    if keywords is None or pd.isna(keywords):
-        return {
-            'categories': [],
-            'subcategories': [],
-            'topics': [],
-            'matched_keywords': [],
-            'category_scores': {},
-            'subcategory_scores': {},
-            'topic_scores': {}
-        }
+    # Default empty result
+    empty_result = {
+        'categories': [],
+        'subcategories': [],
+        'topics': [],
+        'matched_keywords': [],
+        'category_scores': {},
+        'subcategory_scores': {},
+        'topic_scores': {}
+    }
+    
+    # Handle None
+    if keywords is None:
+        return empty_result
+    
+    # Handle scalar NA/NaN values (not arrays)
+    try:
+        if not isinstance(keywords, (list, tuple, np.ndarray)) and pd.isna(keywords):
+            return empty_result
+    except (ValueError, TypeError):
+        # pd.isna might fail on some types, continue
+        pass
     
     # Handle empty lists or non-iterable values
     try:
         if len(keywords) == 0:
-            return {
-                'categories': [],
-                'subcategories': [],
-                'topics': [],
-                'matched_keywords': [],
-                'category_scores': {},
-                'subcategory_scores': {},
-                'topic_scores': {}
-            }
+            return empty_result
     except (TypeError, AttributeError):
         # Not iterable or has no len
-        return {
-            'categories': [],
-            'subcategories': [],
-            'topics': [],
-            'matched_keywords': [],
-            'category_scores': {},
-            'subcategory_scores': {},
-            'topic_scores': {}
-        }
+        return empty_result
     
     # Track best matches for each level
     category_scores = defaultdict(float)
