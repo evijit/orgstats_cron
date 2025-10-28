@@ -2,7 +2,7 @@
 """Configuration for papers data processing pipeline."""
 
 # Data source
-HF_PARQUET_URL = "https://huggingface.co/datasets/cfahlgren1/hub-stats/resolve/main/papers.parquet"
+HF_PARQUET_URL = "https://huggingface.co/datasets/cfahlgren1/hub-stats/resolve/main/daily_papers.parquet"
 
 # Columns to fetch from source
 RAW_DATA_COLUMNS_TO_FETCH = [
