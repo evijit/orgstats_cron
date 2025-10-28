@@ -156,8 +156,32 @@ def semantic_map_keywords(keywords, similarity_threshold=SIMILARITY_THRESHOLD):
     nlp = load_spacy_model()
     taxonomy_embeddings = build_taxonomy_embeddings()
     
-    # Handle None, NaN, or empty values
-    if keywords is None or (isinstance(keywords, float) and pd.isna(keywords)) or len(keywords) == 0:
+    # Handle None, NaN, NA, or empty values
+    if keywords is None or pd.isna(keywords):
+        return {
+            'categories': [],
+            'subcategories': [],
+            'topics': [],
+            'matched_keywords': [],
+            'category_scores': {},
+            'subcategory_scores': {},
+            'topic_scores': {}
+        }
+    
+    # Handle empty lists or non-iterable values
+    try:
+        if len(keywords) == 0:
+            return {
+                'categories': [],
+                'subcategories': [],
+                'topics': [],
+                'matched_keywords': [],
+                'category_scores': {},
+                'subcategory_scores': {},
+                'topic_scores': {}
+            }
+    except (TypeError, AttributeError):
+        # Not iterable or has no len
         return {
             'categories': [],
             'subcategories': [],
