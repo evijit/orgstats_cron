@@ -1,4 +1,5 @@
-# --- config.py (UPDATED) ---
+# config.py
+
 """Configuration file containing all constants and settings."""
 
 import pandas as pd
@@ -7,7 +8,7 @@ import pandas as pd
 PROCESSED_PARQUET_FILE_PATH = "models_processed.parquet"
 HF_PARQUET_URL = 'https://huggingface.co/datasets/cfahlgren1/hub-stats/resolve/main/models.parquet'
 
-# --- NEW: Column Selection for Raw Data Fetching ---
+# --- Column Selection for Raw Data Fetching ---
 # This is the single most important optimization. By selecting only the columns
 # we need, we drastically reduce download size and time.
 RAW_DATA_COLUMNS_TO_FETCH = [
@@ -18,7 +19,8 @@ RAW_DATA_COLUMNS_TO_FETCH = [
     'pipeline_tag',
     'tags',
     'safetensors',
-    'lastModified'
+    'lastModified',
+    'createdAt'
 ]
 
 # --- Model Size Categories ---
@@ -32,16 +34,16 @@ MODEL_SIZE_RANGES = {
 
 # --- Tag Mapping for Feature Detection ---
 TAG_MAP = {
-    'has_audio': ['audio'], 
-    'has_speech': ['speech'], 
+    'has_audio': ['audio'],
+    'has_speech': ['speech'],
     'has_music': ['music'],
-    'has_robot': ['robot', 'robotics', 'openvla', 'vla'], 
-    'has_bio': ['bio'], 
-    'has_med': ['medic', 'medical'], 
-    'has_series': ['series', 'time-series', 'timeseries'], 
-    'has_video': ['video'], 
-    'has_image': ['image', 'vision'], 
-    'has_text': ['text', 'nlp', 'llm'] 
+    'has_robot': ['robot', 'robotics', 'openvla', 'vla'],
+    'has_bio': ['bio'],
+    'has_med': ['medic', 'medical'],
+    'has_series': ['series', 'time-series', 'timeseries'],
+    'has_video': ['video'],
+    'has_image': ['image', 'vision'],
+    'has_text': ['text', 'nlp', 'llm']
 }
 
 # --- Expected Columns for Final Output ---
@@ -51,19 +53,21 @@ FINAL_EXPECTED_COLUMNS = [
     'has_audio', 'has_speech', 'has_music', 'has_robot', 'has_bio', 'has_med',
     'has_series', 'has_video', 'has_image', 'has_text', 'has_science',
     'is_audio_speech', 'is_biomed',
-    'data_download_timestamp'
+    'data_download_timestamp',
+    'createdAt'
 ]
 
 # --- Column Setup Configuration ---
 # Note: This list should be a subset of RAW_DATA_COLUMNS_TO_FETCH
 EXPECTED_COLUMNS_SETUP = {
-    'id': str, 
-    'downloads': float, 
-    'downloadsAllTime': float, 
+    'id': str,
+    'downloads': float,
+    'downloadsAllTime': float,
     'likes': float,
-    'pipeline_tag': str, 
-    'tags': object, 
-    'safetensors': object
+    'pipeline_tag': str,
+    'tags': object,
+    'safetensors': object,
+    'createdAt': object
 }
 
 # --- Debugging Configuration ---

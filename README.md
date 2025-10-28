@@ -31,8 +31,12 @@ This repository contains modular data processing pipelines that fetch, process, 
 
 ## 🚀 Available Pipelines
 
+<<<<<<< HEAD
 ### 1. Models Pipeline (`main.py`)
 Processes HuggingFace model data with feature extraction and categorization.
+=======
+The pipeline consists of 6 steps:
+>>>>>>> 4c0d87211074dc0015b107b44c2120b7cf77c09f
 
 ### 2. Datasets Pipeline (`main_datasets.py`)
 Processes HuggingFace datasets data.
