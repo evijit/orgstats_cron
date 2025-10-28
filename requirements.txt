@@ -6,3 +6,5 @@ tqdm
 huggingface-hub
 psutil
 fastparquet
+spacy
+datasets

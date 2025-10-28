@@ -1,0 +1,488 @@
+{
+  "Algorithms and Learning Methods": {
+    "Supervised Learning": [
+      "Classification",
+      "Regression",
+      "Structured Prediction",
+      "Ranking and Preference Learning"
+    ],
+    "Unsupervised Learning": [
+      "Clustering",
+      "Density Estimation",
+      "Unsupervised Representation Learning"
+    ],
+    "Semi-Supervised and Self-Supervised Learning": [
+      "Semi-Supervised Learning",
+      "Self-Supervised Learning"
+    ],
+    "Reinforcement Learning and Planning": [
+      "Reinforcement Learning",
+      "Reinforcement Learning with Human Feedback (RLHF)",
+      "Markov Decision Processes",
+      "Model-Based RL",
+      "Multi-Agent RL",
+      "Hierarchical RL",
+      "Exploration",
+      "Decision and Control",
+      "Planning",
+      "Planning Algorithms",
+      "Navigation"
+    ],
+    "Transfer and Adaptation": [
+      "Transfer Learning",
+      "Meta-Learning",
+      "Multitask Learning",
+      "Lifelong Learning",
+      "Continual Learning",
+      "Few-Shot Learning",
+      "Domain Adaptation",
+      "Model Mixing Methods"
+    ],
+    "Representation Learning": [
+      "Representation Learning",
+      "Embedding Approaches",
+      "Metric Learning",
+      "Similarity and Distance Learning",
+      "Nonlinear Dimensionality Reduction and Manifold Learning",
+      "Components Analysis (CCA, ICA, LDA, PCA)",
+      "Sparse Coding and Dimensionality Expansion",
+      "Sparsity and Compressed Sensing"
+    ],
+    "Model Alignment and Adaptation": [
+      "Fine-Tuning",
+      "Instruction-Tuning",
+      "Prompt Tuning",
+      "In-Context Learning",
+      "Value Alignment and Human Feedback",
+      "Alignment Methods"
+    ],
+    "Adversarial and Robust Learning": [
+      "Adversarial Learning",
+      "AI Red Teaming and Adversarial Testing",
+      "Adversarial Attacks and Defenses",
+      "Threat Models and Mitigations"
+    ],
+    "Active and Interactive Learning": [
+      "Active Learning",
+      "Online Learning",
+      "Interactive Learning",
+      "Bandit Algorithms",
+      "Dialog- or Communication-Based Learning"
+    ],
+    "Ensemble and Boosting Methods": [
+      "Boosting and Ensemble Methods"
+    ],
+    "Specialized Learning Paradigms": [
+      "AutoML",
+      "Multimodal Learning",
+      "Relational Learning",
+      "Collaborative Filtering",
+      "Adaptive Data Analysis",
+      "Communication- or Memory-Bounded Learning",
+      "Large Scale Learning",
+      "Program Induction",
+      "Learning and Unlearning"
+    ],
+    "Data Handling": [
+      "Missing Data",
+      "Data Compression",
+      "Model Selection and Structure Learning"
+    ]
+  },
+  "Deep Learning": {
+    "Architectures": [
+      "CNN Architectures",
+      "Recurrent Networks",
+      "Attention Models",
+      "Transformer Architectures",
+      "Memory-Augmented Neural Networks",
+      "Interaction-Based Deep Networks",
+      "Biologically Plausible Deep Networks"
+    ],
+    "Model Types": [
+      "Deep Autoencoders",
+      "Adversarial Networks",
+      "Generative Models",
+      "Predictive Models",
+      "Supervised Deep Networks"
+    ],
+    "Training and Optimization": [
+      "Efficient Training Methods",
+      "Distributed Training and Inference",
+      "Training Dynamics",
+      "Optimization Instability",
+      "Efficient Inference Methods",
+      "Optimization for Deep Networks"
+    ],
+    "Model Efficiency": [
+      "Model Distillation",
+      "Model Compression",
+      "Quantization",
+      "Sample Efficient Methods",
+      "Memory Efficient Methods"
+    ],
+    "Inference and Decoding": [
+      "Decoding Algorithms",
+      "Reasoning Algorithms",
+      "Search Algorithms"
+    ],
+    "Analysis and Interpretation": [
+      "Analysis and Understanding of Deep Networks",
+      "Visualization or Exposition Techniques for Deep Networks",
+      "Interpretability and Explainability",
+      "Demystification",
+      "Scaling Laws",
+      "Emergent Capabilities",
+      "Grokking"
+    ]
+  },
+  "Probabilistic Methods": {
+    "Bayesian Methods": [
+      "Bayesian Theory",
+      "Bayesian Nonparametrics",
+      "Gaussian Processes"
+    ],
+    "Inference": [
+      "Variational Inference",
+      "MCMC",
+      "Belief Propagation",
+      "Distributed Inference",
+      "Uncertainty Estimation"
+    ],
+    "Models": [
+      "Graphical Models",
+      "Hierarchical Models",
+      "Latent Variable Models",
+      "Topic Models",
+      "Causal Inference",
+      "Causal Reasoning"
+    ],
+    "Probabilistic Programming": [
+      "Probabilistic Programming"
+    ]
+  },
+  "Optimization": {
+    "Continuous Optimization": [
+      "Convex Optimization",
+      "Non-Convex Optimization",
+      "Stochastic Optimization",
+      "Stochastic Methods"
+    ],
+    "Discrete Optimization": [
+      "Discrete Optimization",
+      "Submodular Optimization"
+    ],
+    "Evolutionary Methods": [
+      "Evolutionary Computation"
+    ]
+  },
+  "Theory": {
+    "Learning Theory": [
+      "Computational Learning Theory",
+      "Statistical Learning Theory",
+      "Models of Learning and Generalization",
+      "Hardness of Learning and Approximations",
+      "Regularization",
+      "Fundamental Limitations of Learning",
+      "Complexity of Learning Systems"
+    ],
+    "Statistical Theory": [
+      "Frequentist Statistics",
+      "High-Dimensional Inference",
+      "Large Deviations and Asymptotic Analysis"
+    ],
+    "Mathematical Foundations": [
+      "Information Theory",
+      "Control Theory",
+      "Game Theory and Computational Economics",
+      "Statistical Physics of Learning",
+      "Spaces of Functions and Kernels",
+      "Spectral Methods",
+      "Kernel Methods",
+      "Large Margin Methods"
+    ],
+    "Algorithmic Theory": [
+      "Data-driven Algorithm Design"
+    ]
+  },
+  "Knowledge and Reasoning": {
+    "Knowledge Representation": [
+      "Knowledge Models",
+      "World Models",
+      "Factuality"
+    ],
+    "Reasoning": [
+      "Commonsense Reasoning",
+      "Theory of Mind",
+      "Social Norms Understanding",
+      "Pragmatics"
+    ],
+    "Knowledge Integration": [
+      "Retrieval-Augmented Models",
+      "Tool Use and API Integration",
+      "Neurosymbolic and Hybrid AI Systems (Physics-Informed, Logic, Formal Reasoning)"
+    ]
+  },
+  "Evaluation and Benchmarking": {
+    "Evaluation Methods": [
+      "Benchmarks",
+      "Evaluation Protocols and Metrics",
+      "Human Evaluation",
+      "Machine Evaluation",
+      "Scalable Oversight"
+    ],
+    "Simulation and Testing": [
+      "Simulation Environments",
+      "Assurance Testing and Deployment Policies"
+    ]
+  },
+  "Applications": {
+    "Vision": [
+      "Computer Vision",
+      "Object Detection",
+      "Object Recognition",
+      "Image Segmentation",
+      "Body Pose, Face, and Gesture Analysis",
+      "Tracking and Motion in Video",
+      "Video Analysis",
+      "Visual Question Answering",
+      "Visual Scene Analysis and Interpretation",
+      "Computational Photography",
+      "Denoising"
+    ],
+    "Language": [
+      "Natural Language Processing",
+      "Language Representation Learning",
+      "Dialog Systems",
+      "Conversational AI"
+    ],
+    "Audio and Speech": [
+      "Audio and Speech Processing",
+      "Speech Recognition",
+      "Music Modeling and Analysis"
+    ],
+    "Multimodal": [
+      "Multimodal Models",
+      "Vision-Language Models",
+      "Audio-Visual Learning",
+      "Cross-Modal Learning"
+    ],
+    "Robotics and Embodied AI": [
+      "Robotics",
+      "Motor Control",
+      "Autonomous Systems",
+      "Perception and Action",
+      "Embodied AI"
+    ],
+    "Code and Software": [
+      "Program Understanding and Generation",
+      "Code Generation",
+      "Software Engineering with AI",
+      "Automated Reasoning and Formal Methods"
+    ],
+    "Science and Engineering": [
+      "Computational Biology and Bioinformatics",
+      "Physical Sciences (Physics, Chemistry, Biology)",
+      "Scientific Discovery",
+      "Quantum Learning"
+    ],
+    "Mathematics": [
+      "Mathematical Reasoning",
+      "Theorem Proving",
+      "Symbolic Mathematics"
+    ],
+    "Health and Medicine": [
+      "Medical Applications",
+      "Clinical Decision Support",
+      "Drug Discovery",
+      "Healthcare AI"
+    ],
+    "Education": [
+      "Educational Applications",
+      "Intelligent Tutoring Systems",
+      "Educational Technology"
+    ],
+    "Social and Web": [
+      "Computational Social Science",
+      "Recommender Systems",
+      "Information Retrieval",
+      "Web Applications and Internet Data",
+      "Network Analysis"
+    ],
+    "Interactive Systems": [
+      "Game Playing",
+      "Multi-Agent Systems",
+      "Human-AI Interaction"
+    ],
+    "Data and Signals": [
+      "Signal Processing",
+      "Time Series Analysis",
+      "Matrix and Tensor Factorization",
+      "Database Applications"
+    ],
+    "Finance and Economics": [
+      "Quantitative Finance and Econometrics",
+      "Economic Modeling"
+    ],
+    "Activity and Recognition": [
+      "Activity and Event Recognition"
+    ],
+    "Infrastructure": [
+      "Hardware and Systems",
+      "Sustainability"
+    ]
+  },
+  "Data": {
+    "Data Collection and Curation": [
+      "Pre-Training Data",
+      "Data Curation and Analysis",
+      "Manual and Algorithmic Data Processing",
+      "Responsible Data Management"
+    ],
+    "Data Generation": [
+      "Synthetic Data Generation",
+      "Data Augmentation"
+    ],
+    "Data Resources": [
+      "Benchmarks",
+      "Data Sets or Data Repositories",
+      "Datasets and Benchmarks"
+    ]
+  },
+  "Infrastructure and Tools": {
+    "Software and Libraries": [
+      "Software Toolkits",
+      "Infrastructure, Software Libraries",
+      "Virtual Environments"
+    ],
+    "Hardware and Systems": [
+      "Hardware Setups for Large-Scale Training",
+      "Distributed Systems",
+      "Specialized Hardware"
+    ]
+  },
+  "Neuroscience and Cognitive Science": {
+    "Brain Studies": [
+      "Brain Imaging",
+      "Brain Mapping",
+      "Brain Segmentation",
+      "Connectomics",
+      "Neural Coding",
+      "Spike Train Generation",
+      "Synaptic Modulation"
+    ],
+    "Cognitive Functions": [
+      "Cognitive Science",
+      "Memory",
+      "Perception",
+      "Visual Perception",
+      "Auditory Perception",
+      "Problem Solving",
+      "Reasoning",
+      "Linguistics",
+      "Psycholinguistics"
+    ],
+    "Learning and Adaptation": [
+      "Human or Animal Learning",
+      "Plasticity and Adaptation",
+      "Neuropsychology"
+    ],
+    "Brain-Computer Interfaces": [
+      "Brain-Computer Interfaces and Neural Prostheses"
+    ],
+    "Philosophy": [
+      "Philosophical Perspectives on AI",
+      "Philosophy of Mind and Language",
+      "Cognitive Philosophy"
+    ]
+  },
+  "Structured Data": {
+    "Graphs and Geometry": [
+      "Learning on Graphs",
+      "Geometric Deep Learning",
+      "Topology and Manifold Learning"
+    ]
+  },
+  "Societal Considerations": {
+    "Fairness and Equity": [
+      "Algorithmic Fairness and Bias",
+      "Bias in AI Systems",
+      "Equity",
+      "Algorithmic Recourse",
+      "Justice, Power, and Inequality"
+    ],
+    "Safety and Security": [
+      "AI Safety",
+      "Security",
+      "Adversarial Robustness",
+      "Risks, Harms, and Failures",
+      "Safe and Trustworthy AI"
+    ],
+    "Privacy": [
+      "Privacy, Anonymity, and Security",
+      "Data Protection",
+      "Privacy-Preserving Methods"
+    ],
+    "Misinformation and Content": [
+      "Misinformation and Disinformation",
+      "Content Moderation",
+      "Information Integrity"
+    ],
+    "Transparency and Accountability": [
+      "Fairness, Accountability, and Transparency",
+      "Transparency Documentation",
+      "Audits of AI Systems",
+      "Explainability for Accountability"
+    ],
+    "Human Factors": [
+      "Human-AI Interaction",
+      "Trust in AI Systems",
+      "Human-Centered AI",
+      "Participatory and Deliberative Methods"
+    ],
+    "Design and Development": [
+      "Sociotechnical Design and Development",
+      "Value-Sensitive Design",
+      "Diversity in Design and Development",
+      "Responsible Development Practices"
+    ],
+    "Societal Impacts": [
+      "Cultural Impacts",
+      "Environmental Impacts and Climate Change",
+      "Labor and Economic Impacts",
+      "Job Displacement and Automation",
+      "Misuse of AI Systems"
+    ],
+    "Governance and Policy": [
+      "Regulation and Governance",
+      "Legal Topics in AI",
+      "Policy and Law",
+      "Licensing and Liability",
+      "Organizational Factors"
+    ],
+    "Critical Perspectives": [
+      "Critical and Sociotechnical Foresight",
+      "Historical and Humanistic Perspectives",
+      "Social Scientific Perspectives",
+      "Resistance and Contestation",
+      "Social Epistemology"
+    ],
+    "Values and Ethics": [
+      "Moral and Political Philosophy of AI",
+      "Ethics in AI",
+      "Values in Technology Design"
+    ],
+    "Cross-Cultural and Multilingual": [
+      "Multi-Linguality",
+      "Low-Resource Languages",
+      "Vernacular Languages",
+      "Multiculturalism",
+      "Value Pluralism",
+      "Cross-Cultural AI"
+    ],
+    "Interdisciplinary Approaches": [
+      "Interdisciplinarity and Cross-Functional Teams",
+      "Industry, Government, and Civil Society Collaboration"
+    ]
+  }
+}
