@@ -49,10 +49,10 @@ jobs:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
         pip install huggingface_hub
-        huggingface-cli upload evijit/modelverse_daily_data \
+        hf upload evijit/modelverse_daily_data \
           ${{ steps.verify_models.outputs.file_path }} \
           ${{ steps.verify_models.outputs.file_path }} \
-          --repo-type dataset --commit-message "Automated models data update" --token $HF_TOKEN
+          --repo-type dataset --commit-message "Automated models data update"
 
   update-datasets-data:
     name: "Update Daily Datasets Data"
@@ -97,10 +97,10 @@ jobs:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
         pip install huggingface_hub
-        huggingface-cli upload evijit/dataverse_daily_data \
+        hf upload evijit/dataverse_daily_data \
           ${{ steps.verify_datasets.outputs.file_path }} \
           ${{ steps.verify_datasets.outputs.file_path }} \
-          --repo-type dataset --commit-message "Automated datasets data update" --token $HF_TOKEN
+          --repo-type dataset --commit-message "Automated datasets data update"
 
   update-papers-data:
     name: "Update Daily Papers Data with Taxonomy"
@@ -151,22 +151,22 @@ jobs:
       run: |
         pip install huggingface_hub
         # Upload all generated files
-        huggingface-cli upload evijit/paperverse_daily_data \
+        hf upload evijit/paperverse_daily_data \
           papers_with_semantic_taxonomy.parquet \
           papers_with_semantic_taxonomy.parquet \
-          --repo-type dataset --commit-message "Automated papers data update with taxonomy" --token $HF_TOKEN
+          --repo-type dataset --commit-message "Automated papers data update with taxonomy"
         
-        huggingface-cli upload evijit/paperverse_daily_data \
+        hf upload evijit/paperverse_daily_data \
           papers_with_semantic_taxonomy.csv \
           papers_with_semantic_taxonomy.csv \
-          --repo-type dataset --commit-message "Automated papers data update with taxonomy" --token $HF_TOKEN
+          --repo-type dataset --commit-message "Automated papers data update with taxonomy"
         
-        huggingface-cli upload evijit/paperverse_daily_data \
+        hf upload evijit/paperverse_daily_data \
           taxonomy_report.txt \
           taxonomy_report.txt \
-          --repo-type dataset --commit-message "Automated papers data update with taxonomy" --token $HF_TOKEN
+          --repo-type dataset --commit-message "Automated papers data update with taxonomy"
         
-        huggingface-cli upload evijit/paperverse_daily_data \
+        hf upload evijit/paperverse_daily_data \
           taxonomy_distribution.json \
           taxonomy_distribution.json \
-          --repo-type dataset --commit-message "Automated papers data update with taxonomy" --token $HF_TOKEN
+          --repo-type dataset --commit-message "Automated papers data update with taxonomy"
