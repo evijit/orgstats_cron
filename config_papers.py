@@ -54,6 +54,7 @@ EXPECTED_COLUMNS_SETUP.update({
 # Final expected columns in output (all original columns plus taxonomy columns)
 FINAL_EXPECTED_COLUMNS = RAW_DATA_COLUMNS_TO_FETCH + [
     'data_download_timestamp',
+    'organization_name',  # Clean string version of organization
     'taxonomy_categories',
     'taxonomy_subcategories',
     'taxonomy_topics',

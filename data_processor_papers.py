@@ -270,14 +270,25 @@ def setup_initial_dataframe(df_raw, data_download_timestamp):
     return df
 
 def enrich_data(df):
-    """Papers data already has organization column, so just validate it exists."""
-    log_progress("✨ Validating papers data organization column...")
+    """Extract organization name from organization dict/string."""
+    log_progress("✨ Processing organization data...")
     
-    if 'organization' not in df.columns:
-        log_progress("   ⚠️  Organization column missing, will use paper_id to extract org")
-        df['organization'] = df['paper_id'].apply(extract_org_from_id)
+    # The organization column might be a dict, string, or None
+    # Extract the name if it's a dict
+    def extract_org_name(org):
+        if org is None or pd.isna(org):
+            return "unaffiliated"
+        if isinstance(org, dict):
+            # Try to get name from dict
+            return org.get('name') or org.get('fullname') or org.get('_id') or "unaffiliated"
+        if isinstance(org, str):
+            return org if org else "unaffiliated"
+        return "unaffiliated"
     
-    org_count = df['organization'].nunique()
+    # Create a clean organization_name column
+    df['organization_name'] = df['organization'].apply(extract_org_name)
+    
+    org_count = df['organization_name'].nunique()
     log_progress(f"   Found {org_count:,} unique organizations.")
     log_memory_usage()
     return df
@@ -343,7 +354,7 @@ def apply_semantic_taxonomy(df):
 if __name__ == "__main__":
     log_progress("🧪 Testing data_processor_papers module...")
     
-    # Create sample data
+    # Create sample data with organization as dict (like real data)
     raw_data = {
         'paper_id': ['org1/paper1', 'org2/paper2', 'unaffiliated_paper3'],
         'paper_title': ['Deep Learning Paper', 'Computer Vision Study', 'NLP Research'],
@@ -354,7 +365,11 @@ if __name__ == "__main__":
         ],
         'paper_upvotes': [100, 200, 300],
         'paper_publishedAt': ['2025-01-01', '2025-01-02', '2025-01-03'],
-        'organization': ['org1', 'org2', 'unaffiliated']
+        'organization': [
+            {'name': 'org1', 'fullname': 'Organization 1'},
+            {'name': 'org2', 'fullname': 'Organization 2'},
+            None
+        ]
     }
     df_raw_test = pd.DataFrame(raw_data)
     timestamp_test = pd.Timestamp.now(tz='UTC')
@@ -366,7 +381,7 @@ if __name__ == "__main__":
         
         log_progress("✅ Data processor test successful")
         print("\n--- Final Test DataFrame ---")
-        print(df_test[['paper_id', 'organization', 'primary_category', 'primary_subcategory', 'primary_topic']].to_string())
+        print(df_test[['paper_id', 'organization_name', 'primary_category', 'primary_subcategory', 'primary_topic']].to_string())
         print("--------------------------\n")
 
     except Exception as e:

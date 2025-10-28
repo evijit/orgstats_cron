@@ -21,7 +21,7 @@ def run_test_pipeline():
         log_progress("\n--- Step 2: Processing data ---")
         df = setup_initial_dataframe(df_raw, timestamp)
         df = enrich_data(df)
-        assert 'organization' in df.columns, "Organization column not created."
+        assert 'organization_name' in df.columns, "Organization_name column not created."
         log_progress("✅ Data processing and enrichment complete.")
 
         # 3. Taxonomy Mapping
