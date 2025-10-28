@@ -1,4 +1,4 @@
-name: Daily HF Data Update (Models & Datasets)
+name: Daily HF Data Update (Models, Datasets & Papers)
 
 on:
   schedule:
@@ -101,3 +101,72 @@ jobs:
           ${{ steps.verify_datasets.outputs.file_path }} \
           ${{ steps.verify_datasets.outputs.file_path }} \
           --repo-type dataset --commit-message "Automated datasets data update" --token $HF_TOKEN
+
+  update-papers-data:
+    name: "Update Daily Papers Data with Taxonomy"
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Download spaCy model
+      run: |
+        python -m spacy download en_core_web_lg
+
+    - name: Test Papers pipeline on a small data subset
+      env:
+        TEST_DATA_LIMIT: 50
+      run: python test_pipeline_papers.py
+
+    - name: Run Papers processing pipeline (full dataset)
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: timeout 5400s python -u main_papers.py
+
+    - name: Verify Papers output files
+      id: verify_papers
+      run: |
+        if [ ! -f "papers_with_semantic_taxonomy.parquet" ]; then exit 1; fi
+        file_size_mb=$(($(stat -c%s "papers_with_semantic_taxonomy.parquet") / 1024 / 1024))
+        if [ $file_size_mb -lt 1 ]; then exit 1; fi
+        echo "parquet_file=papers_with_semantic_taxonomy.parquet" >> $GITHUB_OUTPUT
+        echo "csv_file=papers_with_semantic_taxonomy.csv" >> $GITHUB_OUTPUT
+        echo "has_changes=true" >> $GITHUB_OUTPUT
+
+    - name: Upload Papers data to Hugging Face
+      if: steps.verify_papers.outputs.has_changes == 'true'
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+      run: |
+        pip install huggingface_hub
+        # Upload all generated files
+        huggingface-cli upload evijit/paperverse_daily_data \
+          papers_with_semantic_taxonomy.parquet \
+          papers_with_semantic_taxonomy.parquet \
+          --repo-type dataset --commit-message "Automated papers data update with taxonomy" --token $HF_TOKEN
+        
+        huggingface-cli upload evijit/paperverse_daily_data \
+          papers_with_semantic_taxonomy.csv \
+          papers_with_semantic_taxonomy.csv \
+          --repo-type dataset --commit-message "Automated papers data update with taxonomy" --token $HF_TOKEN
+        
+        huggingface-cli upload evijit/paperverse_daily_data \
+          taxonomy_report.txt \
+          taxonomy_report.txt \
+          --repo-type dataset --commit-message "Automated papers data update with taxonomy" --token $HF_TOKEN
+        
+        huggingface-cli upload evijit/paperverse_daily_data \
+          taxonomy_distribution.json \
+          taxonomy_distribution.json \
+          --repo-type dataset --commit-message "Automated papers data update with taxonomy" --token $HF_TOKEN
