@@ -236,15 +236,10 @@ jobs:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
         pip install huggingface_hub
-        # Upload all generated files
+        # Upload parquet and metadata files (CSV removed - parquet is more efficient)
         hf upload evijit/paperverse_daily_data \
           papers_with_semantic_taxonomy.parquet \
           papers_with_semantic_taxonomy.parquet \
-          --repo-type dataset --commit-message "Automated papers data update with taxonomy and citations"
-        
-        hf upload evijit/paperverse_daily_data \
-          papers_with_semantic_taxonomy.csv \
-          papers_with_semantic_taxonomy.csv \
           --repo-type dataset --commit-message "Automated papers data update with taxonomy and citations"
         
         hf upload evijit/paperverse_daily_data \
