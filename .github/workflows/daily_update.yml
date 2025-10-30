@@ -102,11 +102,13 @@ jobs:
           ${{ steps.verify_datasets.outputs.file_path }} \
           --repo-type dataset --commit-message "Automated datasets data update"
 
-  papers-setup:
-    name: "Setup Papers Processing"
+  # Papers Wave 0 (Jobs 0-14: papers 0-2,999)
+  papers-wave-0-setup:
+    name: "Papers Wave 0 - Setup"
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.split.outputs.matrix }}
+      total_papers: ${{ steps.split.outputs.total_papers }}
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -121,30 +123,27 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Fetch paper count and calculate job split
+    - name: Calculate Wave 0 jobs
       id: split
       run: |
-        # Fetch data to get count (capture only the last line which is the count)
         PAPER_COUNT=$(python -c "from data_fetcher_papers import fetch_raw_data; df, _ = fetch_raw_data(); print(len(df))" 2>&1 | tail -1)
         echo "Total papers: $PAPER_COUNT"
+        echo "total_papers=$PAPER_COUNT" >> $GITHUB_OUTPUT
         
-        # Calculate job split and show info
-        python split_citation_jobs.py $PAPER_COUNT
-        
-        # Generate matrix for parallel jobs
-        MATRIX=$(python generate_matrix.py $PAPER_COUNT)
-        echo "Matrix: $MATRIX"
+        MATRIX=$(python generate_matrix_wave.py $PAPER_COUNT 0 15)
+        echo "Wave 0 Matrix: $MATRIX"
         echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 
-  fetch-citations:
-    name: "Fetch Citations (Job ${{ matrix.job_id }})"
-    needs: papers-setup
+  papers-wave-0-fetch:
+    name: "Papers Wave 0 - Job ${{ matrix.job_id }}"
+    needs: papers-wave-0-setup
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 360
     strategy:
       matrix:
-        include: ${{ fromJson(needs.papers-setup.outputs.matrix) }}
+        include: ${{ fromJson(needs.papers-wave-0-setup.outputs.matrix) }}
       fail-fast: false
+      max-parallel: 15
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -166,13 +165,206 @@ jobs:
     - name: Upload batch artifact
       uses: actions/upload-artifact@v4
       with:
-        name: citations-batch-${{ matrix.job_id }}
+        name: citations-wave-0-batch-${{ matrix.job_id }}
         path: citations_batch_*.parquet
-        retention-days: 1
+        retention-days: 7
 
-  update-papers-data:
-    name: "Process Papers with Taxonomy & Merge Citations"
-    needs: [papers-setup, fetch-citations]
+  # Papers Wave 1 (Jobs 15-29: papers 3,000-5,999)
+  papers-wave-1-setup:
+    name: "Papers Wave 1 - Setup"
+    needs: [papers-wave-0-setup, papers-wave-0-fetch]
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.split.outputs.matrix }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Calculate Wave 1 jobs
+      id: split
+      run: |
+        PAPER_COUNT=${{ needs.papers-wave-0-setup.outputs.total_papers }}
+        MATRIX=$(python generate_matrix_wave.py $PAPER_COUNT 1 15)
+        echo "Wave 1 Matrix: $MATRIX"
+        echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
+  papers-wave-1-fetch:
+    name: "Papers Wave 1 - Job ${{ matrix.job_id }}"
+    needs: papers-wave-1-setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.papers-wave-1-setup.outputs.matrix) }}
+      fail-fast: false
+      max-parallel: 15
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Fetch citations for batch
+      run: |
+        python fetch_citations_batch.py ${{ matrix.start_idx }} ${{ matrix.end_idx }}
+
+    - name: Upload batch artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: citations-wave-1-batch-${{ matrix.job_id }}
+        path: citations_batch_*.parquet
+        retention-days: 7
+
+  # Papers Wave 2 (Jobs 30-44: papers 6,000-8,999)
+  papers-wave-2-setup:
+    name: "Papers Wave 2 - Setup"
+    needs: [papers-wave-0-setup, papers-wave-1-fetch]
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.split.outputs.matrix }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Calculate Wave 2 jobs
+      id: split
+      run: |
+        PAPER_COUNT=${{ needs.papers-wave-0-setup.outputs.total_papers }}
+        MATRIX=$(python generate_matrix_wave.py $PAPER_COUNT 2 15)
+        echo "Wave 2 Matrix: $MATRIX"
+        echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
+  papers-wave-2-fetch:
+    name: "Papers Wave 2 - Job ${{ matrix.job_id }}"
+    needs: papers-wave-2-setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.papers-wave-2-setup.outputs.matrix) }}
+      fail-fast: false
+      max-parallel: 15
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Fetch citations for batch
+      run: |
+        python fetch_citations_batch.py ${{ matrix.start_idx }} ${{ matrix.end_idx }}
+
+    - name: Upload batch artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: citations-wave-2-batch-${{ matrix.job_id }}
+        path: citations_batch_*.parquet
+        retention-days: 7
+
+  # Papers Wave 3 (Jobs 45-52: papers 9,000-10,519)
+  papers-wave-3-setup:
+    name: "Papers Wave 3 - Setup (Final)"
+    needs: [papers-wave-0-setup, papers-wave-2-fetch]
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.split.outputs.matrix }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Calculate Wave 3 jobs
+      id: split
+      run: |
+        PAPER_COUNT=${{ needs.papers-wave-0-setup.outputs.total_papers }}
+        MATRIX=$(python generate_matrix_wave.py $PAPER_COUNT 3 15)
+        echo "Wave 3 Matrix (Final): $MATRIX"
+        echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
+  papers-wave-3-fetch:
+    name: "Papers Wave 3 - Job ${{ matrix.job_id }}"
+    needs: papers-wave-3-setup
+    runs-on: ubuntu-latest
+    timeout-minutes: 360
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.papers-wave-3-setup.outputs.matrix) }}
+      fail-fast: false
+      max-parallel: 15
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Fetch citations for batch
+      run: |
+        python fetch_citations_batch.py ${{ matrix.start_idx }} ${{ matrix.end_idx }}
+
+    - name: Upload batch artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: citations-wave-3-batch-${{ matrix.job_id }}
+        path: citations_batch_*.parquet
+        retention-days: 7
+
+  # Merge all waves and process papers with taxonomy
+  papers-merge-and-process:
+    name: "Papers - Merge All Citations & Process"
+    needs: papers-wave-3-fetch
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
@@ -193,13 +385,13 @@ jobs:
       run: |
         python -m spacy download en_core_web_lg
 
-    - name: Download all citation batch artifacts
+    - name: Download all citation artifacts from all waves
       uses: actions/download-artifact@v4
       with:
-        pattern: citations-batch-*
+        pattern: citations-wave-*
         merge-multiple: true
 
-    - name: Merge citation batches
+    - name: Merge all citation batches
       run: |
         python merge_citation_batches.py
 
@@ -209,15 +401,12 @@ jobs:
         ENABLE_CITATION_FETCHING: false
       run: python test_pipeline_papers.py
 
-    - name: Run Papers processing pipeline (taxonomy only, citations from merged file)
+    - name: Run Papers processing pipeline (taxonomy only)
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
         ENABLE_CITATION_FETCHING: false
       run: |
-        # Process papers with taxonomy (skip citation fetching, we have them merged)
         timeout 3600s python -u main_papers.py
-        
-        # Merge the citation data into the final output
         python merge_citations_into_papers.py
 
     - name: Verify Papers output files
@@ -227,7 +416,6 @@ jobs:
         file_size_mb=$(($(stat -c%s "papers_with_semantic_taxonomy.parquet") / 1024 / 1024))
         if [ $file_size_mb -lt 1 ]; then exit 1; fi
         echo "parquet_file=papers_with_semantic_taxonomy.parquet" >> $GITHUB_OUTPUT
-        echo "csv_file=papers_with_semantic_taxonomy.csv" >> $GITHUB_OUTPUT
         echo "has_changes=true" >> $GITHUB_OUTPUT
 
     - name: Upload Papers data to Hugging Face
@@ -236,18 +424,17 @@ jobs:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
         pip install huggingface_hub
-        # Upload parquet and metadata files (CSV removed - parquet is more efficient)
         hf upload evijit/paperverse_daily_data \
           papers_with_semantic_taxonomy.parquet \
           papers_with_semantic_taxonomy.parquet \
-          --repo-type dataset --commit-message "Automated papers data update with taxonomy and citations"
+          --repo-type dataset --commit-message "Automated papers update with citations (all waves)"
         
         hf upload evijit/paperverse_daily_data \
           taxonomy_report.txt \
           taxonomy_report.txt \
-          --repo-type dataset --commit-message "Automated papers data update with taxonomy and citations"
+          --repo-type dataset --commit-message "Automated papers update with citations (all waves)"
         
         hf upload evijit/paperverse_daily_data \
           taxonomy_distribution.json \
           taxonomy_distribution.json \
-          --repo-type dataset --commit-message "Automated papers data update with taxonomy and citations"
+          --repo-type dataset --commit-message "Automated papers update with citations (all waves)"
