@@ -320,26 +320,11 @@ def setup_initial_dataframe(df_raw, data_download_timestamp):
     log_memory_usage()
     return df
 
-# Global semantic scholar client (reused across calls)
-_semantic_scholar_client = None
-
-def get_semantic_scholar_client():
-    """Get or create a reusable Semantic Scholar client."""
-    global _semantic_scholar_client
-    if _semantic_scholar_client is None:
-        try:
-            from semanticscholar import SemanticScholar
-            # Use 15s timeout - balance between speed and success rate
-            _semantic_scholar_client = SemanticScholar(timeout=15)
-        except ImportError:
-            return None
-    return _semantic_scholar_client
-
 def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_details=False):
     """
     Fetch citation count and Semantic Scholar ID for a paper.
     
-    Uses Semantic Scholar's search API to find papers by title only.
+    Uses Semantic Scholar's REST API directly (faster than Python package).
     Returns citation count and paper ID from the first matching result.
     
     Args:
@@ -352,11 +337,7 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
         tuple: (citation_count, semantic_scholar_id) or (None, None) if unavailable
     """
     try:
-        sch = get_semantic_scholar_client()
-        if sch is None:
-            if log_details:
-                log_progress("   ❌ semanticscholar package not installed")
-            return (None, None)
+        import requests
         
         # Search by title only
         if paper_title and isinstance(paper_title, str) and paper_title.strip():
@@ -368,33 +349,65 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
                     display_title = query[:80] + "..." if len(query) > 80 else query
                     log_progress(f"🔍 Searching: {display_title}")
                 
-                # Search and get first result
-                results = sch.search_paper(query, limit=1)
+                # Use direct REST API (much faster than the Python package)
+                url = "https://api.semanticscholar.org/graph/v1/paper/search"
+                params = {
+                    "query": query,
+                    "limit": 1,
+                    "fields": "paperId,citationCount,title"
+                }
                 
-                # Iterate and break after first result to avoid pagination issues
-                for paper in results:
-                    citation_count = paper.citationCount if paper.citationCount is not None else None
-                    ss_paper_id = paper.paperId if hasattr(paper, 'paperId') else None
-                    
+                response = requests.get(url, params=params, timeout=10)
+                
+                if response.status_code == 429:
+                    # Rate limited - wait and retry once
                     if log_details:
-                        if citation_count is not None:
-                            log_progress(f"   ✅ Found: {citation_count:,} citations (ID: {ss_paper_id})")
-                        else:
-                            log_progress(f"   ⚠️  Found paper but no citation data (ID: {ss_paper_id})")
-                    
-                    return (citation_count, ss_paper_id)
+                        log_progress(f"   ⚠️  Rate limited, waiting 10s...")
+                    import time
+                    time.sleep(10)
+                    response = requests.get(url, params=params, timeout=10)
                 
-                # No results found
-                if log_details:
-                    log_progress(f"   ❌ Not found in Semantic Scholar")
+                if response.status_code == 200:
+                    data = response.json()
+                    results = data.get("data", [])
+                    
+                    if results and len(results) > 0:
+                        paper = results[0]
+                        citation_count = paper.get("citationCount")
+                        ss_paper_id = paper.get("paperId")
                         
+                        if log_details:
+                            if citation_count is not None:
+                                log_progress(f"   ✅ Found: {citation_count:,} citations (ID: {ss_paper_id})")
+                            else:
+                                log_progress(f"   ⚠️  Found paper but no citation data (ID: {ss_paper_id})")
+                        
+                        return (citation_count, ss_paper_id)
+                    else:
+                        # No results found
+                        if log_details:
+                            log_progress(f"   ❌ Not found in Semantic Scholar")
+                elif response.status_code == 429:
+                    # Rate limited
+                    if log_details:
+                        log_progress(f"   ⚠️  Rate limited, skipping")
+                else:
+                    if log_details:
+                        log_progress(f"   ❌ API error: {response.status_code}")
+                        
+            except requests.Timeout:
+                if log_details:
+                    log_progress(f"   ❌ Timeout")
             except Exception as e:
                 if log_details:
                     log_progress(f"   ❌ Error: {str(e)[:100]}")
-                pass
         
         return (None, None)
         
+    except ImportError:
+        if log_details:
+            log_progress("   ❌ requests package not installed")
+        return (None, None)
     except Exception as e:
         if log_details:
             log_progress(f"   ❌ Unexpected error: {str(e)[:100]}")
