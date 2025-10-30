@@ -320,6 +320,21 @@ def setup_initial_dataframe(df_raw, data_download_timestamp):
     log_memory_usage()
     return df
 
+# Global semantic scholar client (reused across calls)
+_semantic_scholar_client = None
+
+def get_semantic_scholar_client():
+    """Get or create a reusable Semantic Scholar client."""
+    global _semantic_scholar_client
+    if _semantic_scholar_client is None:
+        try:
+            from semanticscholar import SemanticScholar
+            # Use 5s timeout - most successful queries return in 1-2s
+            _semantic_scholar_client = SemanticScholar(timeout=5)
+        except ImportError:
+            return None
+    return _semantic_scholar_client
+
 def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_details=False):
     """
     Fetch citation count and Semantic Scholar ID for a paper.
@@ -337,10 +352,11 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
         tuple: (citation_count, semantic_scholar_id) or (None, None) if unavailable
     """
     try:
-        from semanticscholar import SemanticScholar
-        
-        # Create client with timeout
-        sch = SemanticScholar(timeout=30)
+        sch = get_semantic_scholar_client()
+        if sch is None:
+            if log_details:
+                log_progress("   ❌ semanticscholar package not installed")
+            return (None, None)
         
         # Search by title only
         if paper_title and isinstance(paper_title, str) and paper_title.strip():
@@ -379,11 +395,6 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
         
         return (None, None)
         
-    except ImportError:
-        # semanticscholar not available
-        if log_details:
-            log_progress("   ❌ semanticscholar package not installed")
-        return (None, None)
     except Exception as e:
         if log_details:
             log_progress(f"   ❌ Unexpected error: {str(e)[:100]}")

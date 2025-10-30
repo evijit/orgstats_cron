@@ -45,16 +45,22 @@ def fetch_citations_batch(df, start_idx, end_idx):
         # Log each paper being processed (with count)
         log_progress(f"\n[{idx}/{len(df_subset)}] Paper ID: {paper_id}")
         
-        # Fetch with detailed logging enabled
-        citations, ss_id = get_paper_citations(paper_id, paper_title, log_details=True)
-        citation_counts.append(citations)
-        semantic_scholar_ids.append(ss_id)
+        # Skip papers without titles to avoid wasting time
+        if not paper_title or not isinstance(paper_title, str) or not paper_title.strip():
+            log_progress(f"   ⚠️  Skipping: No title available")
+            citation_counts.append(None)
+            semantic_scholar_ids.append(None)
+        else:
+            # Fetch with detailed logging enabled
+            citations, ss_id = get_paper_citations(paper_id, paper_title, log_details=True)
+            citation_counts.append(citations)
+            semantic_scholar_ids.append(ss_id)
+            
+            if citations is not None:
+                successful_fetches += 1
         
-        if citations is not None:
-            successful_fetches += 1
-        
-        # Rate limiting
-        if idx < len(df_subset):
+        # Rate limiting (only if we actually made an API call)
+        if idx < len(df_subset) and paper_title and paper_title.strip():
             time.sleep(CITATION_RATE_LIMIT_DELAY)
         
         # Progress updates every 10 papers

@@ -10,8 +10,8 @@ import math
 
 def generate_matrix(total_papers):
     """Generate job matrix for GitHub Actions."""
-    # Realistic timing: ~90s per paper (API + delay), 200 papers in 5 hours
-    papers_per_job = 200  # ~5 hours per job based on observed performance
+    # Optimized: Reused client, 5s timeout, ~2-3s per paper average
+    papers_per_job = 1000  # ~30-45 minutes per job
     # Cap at 20 jobs (GitHub Actions concurrent limit for public repos)
     num_jobs = min(20, math.ceil(total_papers / papers_per_job))
     
