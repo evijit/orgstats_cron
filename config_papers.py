@@ -72,7 +72,12 @@ FINAL_EXPECTED_COLUMNS = RAW_DATA_COLUMNS_TO_FETCH + [
 # Citation fetching settings
 ENABLE_CITATION_FETCHING = True  # Set to False to skip citation fetching
 CITATION_BATCH_SIZE = 100  # Process citations in batches to show progress
-CITATION_RATE_LIMIT_DELAY = 3  # Seconds between requests (100 req/5min = 3s delay)
+
+# Semantic Scholar via Python package (handles rate limiting internally)
+# Takes ~90 seconds per paper but is more reliable than REST API
+# For 200 papers: ~5 hours per job (well within GitHub Actions 6-hour limit)
+CITATION_RATE_LIMIT_DELAY = 0  # Package handles rate limiting internally
+
 MAX_PAPERS_FOR_CITATIONS = None  # None = all papers (parallel jobs handle time limits automatically)
 
 # Output file

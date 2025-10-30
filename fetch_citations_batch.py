@@ -59,9 +59,7 @@ def fetch_citations_batch(df, start_idx, end_idx):
             if citations is not None:
                 successful_fetches += 1
         
-        # Rate limiting (only if we actually made an API call)
-        if idx < len(df_subset) and paper_title and paper_title.strip():
-            time.sleep(CITATION_RATE_LIMIT_DELAY)
+        # No explicit delay needed - semanticscholar package handles rate limiting
         
         # Progress updates every 10 papers
         if idx % 10 == 0 or idx == len(df_subset):

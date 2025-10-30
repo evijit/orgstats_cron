@@ -102,13 +102,44 @@ jobs:
           ${{ steps.verify_datasets.outputs.file_path }} \
           --repo-type dataset --commit-message "Automated datasets data update"
 
-  # Papers Wave 0 (Jobs 0-14: papers 0-2,999)
+  # Papers - Dynamic Wave Processing
+  papers-setup:
+    name: "Papers - Calculate Waves"
+    runs-on: ubuntu-latest
+    outputs:
+      total_papers: ${{ steps.count.outputs.total_papers }}
+      num_waves: ${{ steps.count.outputs.num_waves }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Count papers and calculate waves
+      id: count
+      run: |
+        PAPER_COUNT=$(python -c "from data_fetcher_papers import fetch_raw_data; df, _ = fetch_raw_data(); print(len(df))" 2>&1 | tail -1)
+        NUM_WAVES=$(python calculate_waves.py $PAPER_COUNT 200 15)
+        echo "Total papers: $PAPER_COUNT"
+        echo "Number of waves needed: $NUM_WAVES"
+        echo "total_papers=$PAPER_COUNT" >> $GITHUB_OUTPUT
+        echo "num_waves=$NUM_WAVES" >> $GITHUB_OUTPUT
+
+  # Papers Wave 0
   papers-wave-0-setup:
     name: "Papers Wave 0 - Setup"
+    needs: papers-setup
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.split.outputs.matrix }}
-      total_papers: ${{ steps.split.outputs.total_papers }}
     steps:
     - name: Checkout repository
       uses: actions/checkout@v4
@@ -126,10 +157,7 @@ jobs:
     - name: Calculate Wave 0 jobs
       id: split
       run: |
-        PAPER_COUNT=$(python -c "from data_fetcher_papers import fetch_raw_data; df, _ = fetch_raw_data(); print(len(df))" 2>&1 | tail -1)
-        echo "Total papers: $PAPER_COUNT"
-        echo "total_papers=$PAPER_COUNT" >> $GITHUB_OUTPUT
-        
+        PAPER_COUNT=${{ needs.papers-setup.outputs.total_papers }}
         MATRIX=$(python generate_matrix_wave.py $PAPER_COUNT 0 15)
         echo "Wave 0 Matrix: $MATRIX"
         echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
@@ -169,10 +197,11 @@ jobs:
         path: citations_batch_*.parquet
         retention-days: 7
 
-  # Papers Wave 1 (Jobs 15-29: papers 3,000-5,999)
+  # Papers Wave 1
   papers-wave-1-setup:
     name: "Papers Wave 1 - Setup"
-    needs: [papers-wave-0-setup, papers-wave-0-fetch]
+    needs: [papers-setup, papers-wave-0-fetch]
+    if: needs.papers-setup.outputs.num_waves >= 2
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.split.outputs.matrix }}
@@ -193,7 +222,7 @@ jobs:
     - name: Calculate Wave 1 jobs
       id: split
       run: |
-        PAPER_COUNT=${{ needs.papers-wave-0-setup.outputs.total_papers }}
+        PAPER_COUNT=${{ needs.papers-setup.outputs.total_papers }}
         MATRIX=$(python generate_matrix_wave.py $PAPER_COUNT 1 15)
         echo "Wave 1 Matrix: $MATRIX"
         echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
@@ -201,6 +230,7 @@ jobs:
   papers-wave-1-fetch:
     name: "Papers Wave 1 - Job ${{ matrix.job_id }}"
     needs: papers-wave-1-setup
+    if: needs.papers-wave-1-setup.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 360
     strategy:
@@ -233,10 +263,14 @@ jobs:
         path: citations_batch_*.parquet
         retention-days: 7
 
-  # Papers Wave 2 (Jobs 30-44: papers 6,000-8,999)
+  # Papers Wave 2
   papers-wave-2-setup:
     name: "Papers Wave 2 - Setup"
-    needs: [papers-wave-0-setup, papers-wave-1-fetch]
+    needs: [papers-setup, papers-wave-1-fetch]
+    if: |
+      always() && 
+      needs.papers-setup.outputs.num_waves >= 3 &&
+      (needs.papers-wave-1-fetch.result == 'success' || needs.papers-wave-1-fetch.result == 'skipped')
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.split.outputs.matrix }}
@@ -257,7 +291,7 @@ jobs:
     - name: Calculate Wave 2 jobs
       id: split
       run: |
-        PAPER_COUNT=${{ needs.papers-wave-0-setup.outputs.total_papers }}
+        PAPER_COUNT=${{ needs.papers-setup.outputs.total_papers }}
         MATRIX=$(python generate_matrix_wave.py $PAPER_COUNT 2 15)
         echo "Wave 2 Matrix: $MATRIX"
         echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
@@ -265,6 +299,7 @@ jobs:
   papers-wave-2-fetch:
     name: "Papers Wave 2 - Job ${{ matrix.job_id }}"
     needs: papers-wave-2-setup
+    if: needs.papers-wave-2-setup.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 360
     strategy:
@@ -297,10 +332,14 @@ jobs:
         path: citations_batch_*.parquet
         retention-days: 7
 
-  # Papers Wave 3 (Jobs 45-52: papers 9,000-10,519)
+  # Papers Wave 3
   papers-wave-3-setup:
-    name: "Papers Wave 3 - Setup (Final)"
-    needs: [papers-wave-0-setup, papers-wave-2-fetch]
+    name: "Papers Wave 3 - Setup"
+    needs: [papers-setup, papers-wave-2-fetch]
+    if: |
+      always() && 
+      needs.papers-setup.outputs.num_waves >= 4 &&
+      (needs.papers-wave-2-fetch.result == 'success' || needs.papers-wave-2-fetch.result == 'skipped')
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.split.outputs.matrix }}
@@ -321,14 +360,15 @@ jobs:
     - name: Calculate Wave 3 jobs
       id: split
       run: |
-        PAPER_COUNT=${{ needs.papers-wave-0-setup.outputs.total_papers }}
+        PAPER_COUNT=${{ needs.papers-setup.outputs.total_papers }}
         MATRIX=$(python generate_matrix_wave.py $PAPER_COUNT 3 15)
-        echo "Wave 3 Matrix (Final): $MATRIX"
+        echo "Wave 3 Matrix: $MATRIX"
         echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 
   papers-wave-3-fetch:
     name: "Papers Wave 3 - Job ${{ matrix.job_id }}"
     needs: papers-wave-3-setup
+    if: needs.papers-wave-3-setup.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 360
     strategy:
@@ -364,7 +404,8 @@ jobs:
   # Merge all waves and process papers with taxonomy
   papers-merge-and-process:
     name: "Papers - Merge All Citations & Process"
-    needs: papers-wave-3-fetch
+    needs: [papers-setup, papers-wave-0-fetch, papers-wave-1-fetch, papers-wave-2-fetch, papers-wave-3-fetch]
+    if: always() && needs.papers-wave-0-fetch.result == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:

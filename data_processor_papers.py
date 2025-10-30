@@ -324,8 +324,8 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
     """
     Fetch citation count and Semantic Scholar ID for a paper.
     
-    Uses Semantic Scholar's REST API directly (faster than Python package).
-    Returns citation count and paper ID from the first matching result.
+    Uses semanticscholar Python package with timeout handling.
+    More reliable than REST API for batch processing despite being slower.
     
     Args:
         paper_id: ArXiv paper ID (e.g., '2510.22236') - not used but kept for compatibility
@@ -337,7 +337,16 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
         tuple: (citation_count, semantic_scholar_id) or (None, None) if unavailable
     """
     try:
-        import requests
+        from semanticscholar import SemanticScholar
+        from semanticscholar.SemanticScholarException import ObjectNotFoundException
+        import signal
+        
+        # Timeout handler
+        class TimeoutException(Exception):
+            pass
+        
+        def timeout_handler(signum, frame):
+            raise TimeoutException()
         
         # Search by title only
         if paper_title and isinstance(paper_title, str) and paper_title.strip():
@@ -349,32 +358,21 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
                     display_title = query[:80] + "..." if len(query) > 80 else query
                     log_progress(f"🔍 Searching: {display_title}")
                 
-                # Use direct REST API (much faster than the Python package)
-                url = "https://api.semanticscholar.org/graph/v1/paper/search"
-                params = {
-                    "query": query,
-                    "limit": 1,
-                    "fields": "paperId,citationCount,title"
-                }
+                # Set timeout to 90 seconds (same as before)
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(90)
                 
-                response = requests.get(url, params=params, timeout=10)
-                
-                if response.status_code == 429:
-                    # Rate limited - wait and retry once
-                    if log_details:
-                        log_progress(f"   ⚠️  Rate limited, waiting 10s...")
-                    import time
-                    time.sleep(10)
-                    response = requests.get(url, params=params, timeout=10)
-                
-                if response.status_code == 200:
-                    data = response.json()
-                    results = data.get("data", [])
+                try:
+                    sch = SemanticScholar()
+                    results = sch.search_paper(query, limit=1)
+                    
+                    # Cancel the alarm
+                    signal.alarm(0)
                     
                     if results and len(results) > 0:
                         paper = results[0]
-                        citation_count = paper.get("citationCount")
-                        ss_paper_id = paper.get("paperId")
+                        citation_count = paper.citationCount if hasattr(paper, 'citationCount') else None
+                        ss_paper_id = paper.paperId if hasattr(paper, 'paperId') else None
                         
                         if log_details:
                             if citation_count is not None:
@@ -384,21 +382,20 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
                         
                         return (citation_count, ss_paper_id)
                     else:
-                        # No results found
                         if log_details:
                             log_progress(f"   ❌ Not found in Semantic Scholar")
-                elif response.status_code == 429:
-                    # Rate limited
+                            
+                except TimeoutException:
+                    signal.alarm(0)
                     if log_details:
-                        log_progress(f"   ⚠️  Rate limited, skipping")
-                else:
+                        log_progress(f"   ⚠️  Timeout (90s)")
+                except ObjectNotFoundException:
+                    signal.alarm(0)
                     if log_details:
-                        log_progress(f"   ❌ API error: {response.status_code}")
+                        log_progress(f"   ❌ Not found in Semantic Scholar")
                         
-            except requests.Timeout:
-                if log_details:
-                    log_progress(f"   ❌ Timeout")
             except Exception as e:
+                signal.alarm(0)
                 if log_details:
                     log_progress(f"   ❌ Error: {str(e)[:100]}")
         
@@ -406,7 +403,7 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
         
     except ImportError:
         if log_details:
-            log_progress("   ❌ requests package not installed")
+            log_progress("   ❌ semanticscholar package not installed")
         return (None, None)
     except Exception as e:
         if log_details:
