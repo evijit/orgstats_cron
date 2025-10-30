@@ -334,7 +334,8 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
         log_details: If True, log each paper's citation fetch result
         
     Returns:
-        tuple: (citation_count, semantic_scholar_id) or (None, None) if unavailable
+        tuple: (citation_count, semantic_scholar_id, fetch_date) or (None, None, None) if unavailable
+        fetch_date is in YYYY-MM-DD format for successful fetches
     """
     try:
         from semanticscholar import SemanticScholar
@@ -374,13 +375,17 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
                         citation_count = paper.citationCount if hasattr(paper, 'citationCount') else None
                         ss_paper_id = paper.paperId if hasattr(paper, 'paperId') else None
                         
+                        # Get current date for successful fetch
+                        from datetime import datetime
+                        fetch_date = datetime.now().strftime('%Y-%m-%d')
+                        
                         if log_details:
                             if citation_count is not None:
                                 log_progress(f"   ✅ Found: {citation_count:,} citations (ID: {ss_paper_id})")
                             else:
                                 log_progress(f"   ⚠️  Found paper but no citation data (ID: {ss_paper_id})")
                         
-                        return (citation_count, ss_paper_id)
+                        return (citation_count, ss_paper_id, fetch_date)
                     else:
                         if log_details:
                             log_progress(f"   ❌ Not found in Semantic Scholar")
@@ -399,16 +404,16 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
                 if log_details:
                     log_progress(f"   ❌ Error: {str(e)[:100]}")
         
-        return (None, None)
+        return (None, None, None)
         
     except ImportError:
         if log_details:
             log_progress("   ❌ semanticscholar package not installed")
-        return (None, None)
+        return (None, None, None)
     except Exception as e:
         if log_details:
             log_progress(f"   ❌ Unexpected error: {str(e)[:100]}")
-        return (None, None)
+        return (None, None, None)
 
 def fetch_citations(df):
     """
