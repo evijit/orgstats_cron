@@ -55,6 +55,8 @@ EXPECTED_COLUMNS_SETUP.update({
 FINAL_EXPECTED_COLUMNS = RAW_DATA_COLUMNS_TO_FETCH + [
     'data_download_timestamp',
     'organization_name',  # Clean string version of organization
+    'citation_count',  # Number of citations from Semantic Scholar
+    'semantic_scholar_id',  # Semantic Scholar paper ID
     'taxonomy_categories',
     'taxonomy_subcategories',
     'taxonomy_topics',
@@ -67,6 +69,12 @@ FINAL_EXPECTED_COLUMNS = RAW_DATA_COLUMNS_TO_FETCH + [
     'topic_scores'
 ]
 
+# Citation fetching settings
+ENABLE_CITATION_FETCHING = True  # Set to False to skip citation fetching
+CITATION_BATCH_SIZE = 100  # Process citations in batches to show progress
+CITATION_RATE_LIMIT_DELAY = 3  # Seconds between requests (100 req/5min = 20 req/min = 1 req/3sec)
+MAX_PAPERS_FOR_CITATIONS = None  # None = all papers (parallel jobs handle time limits automatically)
+
 # Output file
 PROCESSED_PARQUET_FILE_PATH = 'papers_with_semantic_taxonomy.parquet'
 
@@ -74,6 +82,12 @@ PROCESSED_PARQUET_FILE_PATH = 'papers_with_semantic_taxonomy.parquet'
 TAXONOMY_FILE_PATH = 'integrated_ml_taxonomy.json'
 SIMILARITY_THRESHOLD = 0.55
 SPACY_MODEL = 'en_core_web_lg'
+
+# Multi-classification settings
+MULTI_CLASS_ENABLED = True  # Allow multiple classifications per paper
+MULTI_CLASS_SCORE_THRESHOLD = 0.90  # Include additional classes within 90% of top score
+# E.g., if top score is 0.8, include all scores >= 0.72 (0.8 * 0.9)
+MAX_CLASSIFICATIONS = 5  # Maximum number of classifications per level
 
 # HuggingFace upload settings
 HF_REPO_ID = 'evijit/paperverse_daily_data'

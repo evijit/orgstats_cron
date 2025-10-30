@@ -48,6 +48,10 @@ def save_summary_reports(df):
         total_papers = len(df)
         classified_papers = df['primary_category'].notna().sum()
         
+        # Citation statistics
+        papers_with_citations = df['citation_count'].notna().sum()
+        total_citations = df['citation_count'].sum() if papers_with_citations > 0 else 0
+        
         # Category distribution
         category_counts = df['primary_category'].value_counts()
         subcategory_counts = df['primary_subcategory'].value_counts()
@@ -72,7 +76,22 @@ def save_summary_reports(df):
             
             f.write(f"Total papers: {total_papers:,}\n")
             f.write(f"Classified papers: {classified_papers:,} ({classified_papers/total_papers*100:.1f}%)\n")
-            f.write(f"Unclassified papers: {total_papers - classified_papers:,}\n\n")
+            f.write(f"Unclassified papers: {total_papers - classified_papers:,}\n")
+            
+            # Multi-classification statistics
+            multi_cat_papers = df['taxonomy_categories'].apply(lambda x: len(x) > 1 if isinstance(x, list) else False).sum()
+            f.write(f"Multi-category papers: {multi_cat_papers:,} ({multi_cat_papers/total_papers*100:.1f}%)\n")
+            avg_cats_per_paper = df['taxonomy_categories'].apply(lambda x: len(x) if isinstance(x, list) else 0).mean()
+            f.write(f"Average categories per paper: {avg_cats_per_paper:.2f}\n\n")
+            
+            f.write("CITATION STATISTICS\n")
+            f.write("-" * 80 + "\n")
+            f.write(f"Papers with citations: {papers_with_citations:,} ({papers_with_citations/total_papers*100:.1f}%)\n")
+            if papers_with_citations > 0:
+                f.write(f"Total citations: {int(total_citations):,}\n")
+                f.write(f"Average citations per paper: {total_citations/papers_with_citations:.1f}\n\n")
+            else:
+                f.write("No citation data available\n\n")
             
             if all_scores:
                 f.write(f"Average matching score: {sum(all_scores)/len(all_scores):.3f}\n")
@@ -96,10 +115,24 @@ def save_summary_reports(df):
         log_progress("✅ Saved summary to taxonomy_report.txt")
         
         # Save JSON distribution
+        # Multi-classification stats
+        multi_cat_papers = df['taxonomy_categories'].apply(lambda x: len(x) > 1 if isinstance(x, list) else False).sum()
+        avg_cats_per_paper = df['taxonomy_categories'].apply(lambda x: len(x) if isinstance(x, list) else 0).mean()
+        
         distribution_summary = {
             'total_papers': int(total_papers),
             'classified_papers': int(classified_papers),
             'coverage_percentage': float(classified_papers/total_papers*100) if total_papers > 0 else 0,
+            'multi_classification': {
+                'multi_category_papers': int(multi_cat_papers),
+                'multi_category_percentage': float(multi_cat_papers/total_papers*100) if total_papers > 0 else 0,
+                'average_categories_per_paper': float(avg_cats_per_paper)
+            },
+            'citation_statistics': {
+                'papers_with_citations': int(papers_with_citations),
+                'total_citations': int(total_citations),
+                'average_citations': float(total_citations/papers_with_citations) if papers_with_citations > 0 else 0
+            },
             'category_distribution': {k: int(v) for k, v in category_counts.head(20).items()},
             'subcategory_distribution': {k: int(v) for k, v in subcategory_counts.head(30).items()},
             'topic_distribution': {k: int(v) for k, v in topic_counts.head(50).items()},
@@ -213,8 +246,18 @@ def main_pipeline():
         traceback.print_exc()
         return False
     
-    # Step 3: Semantic Taxonomy Mapping
-    log_progress("\nSTEP 3: Semantic Taxonomy Mapping")
+    # Step 3: Fetch Citations
+    log_progress("\nSTEP 3: Fetching Citations")
+    try:
+        from data_processor_papers import fetch_citations
+        df = fetch_citations(df)
+    except Exception as e:
+        log_progress(f"⚠️  Citation fetching failed (non-critical): {e}")
+        log_progress("   Continuing without citations...")
+        df['citation_count'] = None
+    
+    # Step 4: Semantic Taxonomy Mapping
+    log_progress("\nSTEP 4: Semantic Taxonomy Mapping")
     try:
         df = apply_semantic_taxonomy(df)
     except Exception as e:
@@ -223,8 +266,8 @@ def main_pipeline():
         traceback.print_exc()
         return False
     
-    # Step 4: Finalize DataFrame
-    log_progress("\nSTEP 4: Finalizing DataFrame")
+    # Step 5: Finalize DataFrame
+    log_progress("\nSTEP 5: Finalizing DataFrame")
     try:
         for col in FINAL_EXPECTED_COLUMNS:
             if col not in df.columns:
@@ -238,16 +281,16 @@ def main_pipeline():
         log_progress(f"❌ Final processing failed: {e}")
         return False
     
-    # Step 5: Save Results
-    log_progress("\nSTEP 5: Save Results")
+    # Step 6: Save Results
+    log_progress("\nSTEP 6: Save Results")
     if not save_processed_data(df_final):
         return False
     
     if not save_summary_reports(df_final):
         log_progress("⚠️  Summary reports generation failed, but continuing...")
     
-    # Step 6: Upload to HuggingFace
-    log_progress("\nSTEP 6: Upload to HuggingFace")
+    # Step 7: Upload to HuggingFace
+    log_progress("\nSTEP 7: Upload to HuggingFace")
     upload_to_huggingface(df_final)
     
     # Final Summary

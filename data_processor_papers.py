@@ -12,7 +12,14 @@ from config_papers import (
     EXPECTED_COLUMNS_SETUP,
     TAXONOMY_FILE_PATH,
     SIMILARITY_THRESHOLD,
-    SPACY_MODEL
+    SPACY_MODEL,
+    ENABLE_CITATION_FETCHING,
+    CITATION_BATCH_SIZE,
+    CITATION_RATE_LIMIT_DELAY,
+    MAX_PAPERS_FOR_CITATIONS,
+    MULTI_CLASS_ENABLED,
+    MULTI_CLASS_SCORE_THRESHOLD,
+    MAX_CLASSIFICATIONS
 )
 
 # Global variables for loaded resources
@@ -250,14 +257,39 @@ def semantic_map_keywords(keywords, similarity_threshold=SIMILARITY_THRESHOLD):
     sorted_subcategories = sorted(subcategory_scores.items(), key=lambda x: x[1], reverse=True)
     sorted_topics = sorted(topic_scores.items(), key=lambda x: x[1], reverse=True)
     
+    # Apply multi-classification logic if enabled
+    if MULTI_CLASS_ENABLED and len(sorted_categories) > 0:
+        top_cat_score = sorted_categories[0][1]
+        threshold_cat_score = top_cat_score * MULTI_CLASS_SCORE_THRESHOLD
+        filtered_categories = [(cat, score) for cat, score in sorted_categories 
+                              if score >= threshold_cat_score][:MAX_CLASSIFICATIONS]
+    else:
+        filtered_categories = sorted_categories
+    
+    if MULTI_CLASS_ENABLED and len(sorted_subcategories) > 0:
+        top_subcat_score = sorted_subcategories[0][1]
+        threshold_subcat_score = top_subcat_score * MULTI_CLASS_SCORE_THRESHOLD
+        filtered_subcategories = [(subcat, score) for subcat, score in sorted_subcategories 
+                                 if score >= threshold_subcat_score][:MAX_CLASSIFICATIONS]
+    else:
+        filtered_subcategories = sorted_subcategories
+    
+    if MULTI_CLASS_ENABLED and len(sorted_topics) > 0:
+        top_topic_score = sorted_topics[0][1]
+        threshold_topic_score = top_topic_score * MULTI_CLASS_SCORE_THRESHOLD
+        filtered_topics = [(topic, score) for topic, score in sorted_topics 
+                          if score >= threshold_topic_score][:MAX_CLASSIFICATIONS]
+    else:
+        filtered_topics = sorted_topics
+    
     return {
-        'categories': [cat for cat, score in sorted_categories],
-        'subcategories': [subcat for subcat, score in sorted_subcategories],
-        'topics': [topic for topic, score in sorted_topics],
+        'categories': [cat for cat, score in filtered_categories],
+        'subcategories': [subcat for subcat, score in filtered_subcategories],
+        'topics': [topic for topic, score in filtered_topics],
         'matched_keywords': matched_keywords,
-        'category_scores': {k: float(v) for k, v in sorted_categories},
-        'subcategory_scores': {k: float(v) for k, v in sorted_subcategories},
-        'topic_scores': {k: float(v) for k, v in sorted_topics}
+        'category_scores': {k: float(v) for k, v in filtered_categories},
+        'subcategory_scores': {k: float(v) for k, v in filtered_subcategories},
+        'topic_scores': {k: float(v) for k, v in filtered_topics}
     }
 
 def setup_initial_dataframe(df_raw, data_download_timestamp):
@@ -285,6 +317,145 @@ def setup_initial_dataframe(df_raw, data_download_timestamp):
         raise ValueError("'paper_id' column is required but missing or empty")
     
     log_progress(f"✅ DataFrame setup completed with {len(df.columns)} columns")
+    log_memory_usage()
+    return df
+
+def get_paper_citations(paper_id, paper_title=None, paper_authors=None):
+    """
+    Fetch citation count and Semantic Scholar ID for a paper.
+    
+    Uses Semantic Scholar's search API to find papers by title only.
+    Returns citation count and paper ID from the first matching result.
+    
+    Args:
+        paper_id: ArXiv paper ID (e.g., '2510.22236') - not used but kept for compatibility
+        paper_title: Paper title
+        paper_authors: Not used (kept for compatibility)
+        
+    Returns:
+        tuple: (citation_count, semantic_scholar_id) or (None, None) if unavailable
+    """
+    try:
+        from semanticscholar import SemanticScholar
+        
+        # Create client with timeout
+        sch = SemanticScholar(timeout=30)
+        
+        # Search by title only
+        if paper_title and isinstance(paper_title, str) and paper_title.strip():
+            try:
+                query = paper_title.strip()
+                
+                # Search and get first result
+                results = sch.search_paper(query, limit=1)
+                
+                # Iterate and break after first result to avoid pagination issues
+                for paper in results:
+                    citation_count = paper.citationCount if paper.citationCount is not None else None
+                    ss_paper_id = paper.paperId if hasattr(paper, 'paperId') else None
+                    return (citation_count, ss_paper_id)
+                        
+            except Exception:
+                pass
+        
+        return (None, None)
+        
+    except ImportError:
+        # semanticscholar not available
+        return (None, None)
+    except Exception:
+        return (None, None)
+
+def fetch_citations(df):
+    """
+    Fetch citation counts and Semantic Scholar IDs for all papers in the dataframe.
+    
+    Args:
+        df: DataFrame with paper_id and paper_title columns
+        
+    Returns:
+        DataFrame with citation_count and semantic_scholar_id columns added
+    """
+    if not ENABLE_CITATION_FETCHING:
+        log_progress("⚠️  Citation fetching is disabled. Skipping...")
+        df['citation_count'] = None
+        df['semantic_scholar_id'] = None
+        return df
+    
+    total_papers = len(df)
+    
+    # Determine how many papers to process
+    if MAX_PAPERS_FOR_CITATIONS is not None and total_papers > MAX_PAPERS_FOR_CITATIONS:
+        papers_to_process = MAX_PAPERS_FOR_CITATIONS
+        log_progress(f"📚 Fetching citation counts for top {papers_to_process:,} papers (limited from {total_papers:,})...")
+        log_progress(f"   Sorting by paper_upvotes to prioritize popular papers...")
+        # Sort by upvotes descending and take top N
+        df_sorted = df.sort_values('paper_upvotes', ascending=False, na_position='last')
+        df = df_sorted.copy()
+    else:
+        papers_to_process = total_papers
+        log_progress(f"📚 Fetching citation counts for all {total_papers:,} papers...")
+    
+    log_progress("   Using Semantic Scholar API (title search, first result)")
+    log_progress(f"   Rate limit: {CITATION_RATE_LIMIT_DELAY}s delay between requests")
+    estimated_time = papers_to_process * CITATION_RATE_LIMIT_DELAY / 60
+    log_progress(f"   Estimated time: ~{estimated_time:.1f} minutes")
+    
+    start_time = time.time()
+    citation_counts = []
+    semantic_scholar_ids = []
+    successful_fetches = 0
+    
+    for i, row in df.iterrows():
+        # Stop after processing the limit
+        if i >= papers_to_process:
+            # Fill remaining papers with None
+            remaining = total_papers - papers_to_process
+            citation_counts.extend([None] * remaining)
+            semantic_scholar_ids.extend([None] * remaining)
+            break
+        
+        paper_id = row.get('paper_id', '')
+        paper_title = row.get('paper_title', '')
+        
+        citations, ss_id = get_paper_citations(paper_id, paper_title)
+        citation_counts.append(citations)
+        semantic_scholar_ids.append(ss_id)
+        
+        if citations is not None:
+            successful_fetches += 1
+        
+        # Add delay to respect rate limits
+        if i < papers_to_process - 1:  # Don't delay after last paper
+            time.sleep(CITATION_RATE_LIMIT_DELAY)
+        
+        # Show progress every batch
+        if (i + 1) % CITATION_BATCH_SIZE == 0 or (i + 1) == papers_to_process:
+            elapsed = time.time() - start_time
+            rate = (i + 1) / elapsed if elapsed > 0 else 0
+            eta = (papers_to_process - i - 1) / rate if rate > 0 else 0
+            log_progress(f"   Processed {i + 1:,}/{papers_to_process:,} papers " +
+                        f"({successful_fetches} citations found, {rate:.2f} papers/sec, ETA: {eta/60:.1f}min)...")
+    
+    df['citation_count'] = citation_counts
+    df['semantic_scholar_id'] = semantic_scholar_ids
+    
+    elapsed_time = time.time() - start_time
+    log_progress(f"✅ Citation fetching completed in {elapsed_time/60:.1f} minutes")
+    log_progress(f"   Found citations for {successful_fetches:,}/{papers_to_process:,} papers " +
+                f"({successful_fetches/papers_to_process*100:.1f}%)")
+    if papers_to_process < total_papers:
+        log_progress(f"   Note: {total_papers - papers_to_process:,} papers not processed (limit: {MAX_PAPERS_FOR_CITATIONS:,})")
+    
+    # Show statistics
+    valid_citations = df['citation_count'].dropna()
+    if len(valid_citations) > 0:
+        log_progress(f"   Citation statistics:")
+        log_progress(f"      - Mean: {valid_citations.mean():.1f}")
+        log_progress(f"      - Median: {valid_citations.median():.1f}")
+        log_progress(f"      - Max: {valid_citations.max():.0f}")
+        log_progress(f"      - Total citations: {valid_citations.sum():.0f}")
+    
     log_memory_usage()
     return df
 
@@ -356,10 +527,17 @@ def apply_semantic_taxonomy(df):
     elapsed_time = time.time() - start_time
     log_progress(f"✅ Semantic taxonomy matching completed in {elapsed_time:.2f}s")
     
-    # Show statistics
+    # Show coverage
     total_papers = len(df)
     classified_papers = df['primary_category'].notna().sum()
     log_progress(f"   Coverage: {classified_papers:,}/{total_papers:,} papers ({classified_papers/total_papers*100:.1f}%)")
+    
+    # Show multi-classification statistics
+    if MULTI_CLASS_ENABLED:
+        multi_cat_papers = df['taxonomy_categories'].apply(lambda x: len(x) > 1 if isinstance(x, list) else False).sum()
+        log_progress(f"   Multi-category papers: {multi_cat_papers:,} ({multi_cat_papers/total_papers*100:.1f}%)")
+        avg_cats_per_paper = df['taxonomy_categories'].apply(lambda x: len(x) if isinstance(x, list) else 0).mean()
+        log_progress(f"   Average categories per paper: {avg_cats_per_paper:.2f}")
     
     # Show category distribution
     category_counts = df['primary_category'].value_counts()

@@ -24,15 +24,25 @@ def run_test_pipeline():
         assert 'organization_name' in df.columns, "Organization_name column not created."
         log_progress("✅ Data processing and enrichment complete.")
 
-        # 3. Taxonomy Mapping
-        log_progress("\n--- Step 3: Applying semantic taxonomy ---")
+        # 3. Fetch Citations (optional, may skip in test)
+        log_progress("\n--- Step 3: Fetching citations (test mode) ---")
+        try:
+            from data_processor_papers import fetch_citations
+            df = fetch_citations(df)
+            log_progress("✅ Citation fetching complete.")
+        except Exception as e:
+            log_progress(f"⚠️  Citation fetching skipped in test: {e}")
+            df['citation_count'] = None
+        
+        # 4. Taxonomy Mapping
+        log_progress("\n--- Step 4: Applying semantic taxonomy ---")
         df = apply_semantic_taxonomy(df)
         assert 'primary_category' in df.columns, "Primary category column not created."
         assert 'taxonomy_categories' in df.columns, "Taxonomy categories column not created."
         log_progress("✅ Semantic taxonomy mapping complete.")
 
         # Final validation
-        log_progress("\n--- Step 4: Final validation ---")
+        log_progress("\n--- Step 5: Final validation ---")
         final_rows, final_cols = df.shape
         log_progress(f"Final test DataFrame shape: ({final_rows}, {final_cols})")
         assert final_rows > 0, "Final DataFrame is empty."

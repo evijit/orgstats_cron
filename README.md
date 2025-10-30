@@ -42,16 +42,19 @@ Processes academic papers with **semantic taxonomy mapping** using spaCy NLP.
 
 ## 📄 Papers Pipeline Details
 
-The papers pipeline includes advanced semantic analysis:
+The papers pipeline includes advanced semantic analysis and citation tracking:
 
-- Loads papers from `cfahlgren1/hub-stats` dataset
-- Uses spaCy's `en_core_web_lg` model for semantic similarity
-- Maps paper keywords to ML taxonomy hierarchically:
-  - **Categories** (e.g., Computer Vision, NLP)
-  - **Subcategories** (e.g., Object Detection, Text Classification)
-  - **Topics** (e.g., YOLO, BERT)
-- Generates detailed matching reports and statistics
-- **Uploads to HuggingFace**: `evijit/paperverse_daily_data`
+- **Data Source**: Loads papers from `cfahlgren1/hub-stats` dataset (daily_papers.parquet)
+- **Semantic Taxonomy**: Uses spaCy's `en_core_web_lg` model for semantic similarity
+- **Hierarchical Classification**: Maps paper keywords to ML taxonomy:
+  - **Categories** (e.g., Computer Vision, NLP, Deep Learning)
+  - **Subcategories** (e.g., Object Detection, Text Classification, GANs)
+  - **Topics** (e.g., YOLO, BERT, Transformers)
+- **Multi-Label Classification**: Papers can have multiple categories if they have close similarity scores (within 90% of top score)
+- **Citation Tracking**: Fetches citation counts using `paperscraper` (via DOI and title)
+- **Rich Metadata**: Preserves all 33+ original columns (authors, GitHub repos, upvotes, etc.)
+- **Reports & Analytics**: Generates detailed matching reports and statistics
+- **Auto-Upload**: Uploads to HuggingFace `evijit/paperverse_daily_data`
 
 ### Papers Pipeline Output
 
@@ -75,6 +78,11 @@ Key settings in respective config files:
 - `SIMILARITY_THRESHOLD`: Minimum cosine similarity (default: 0.55)
 - `SPACY_MODEL`: NLP model to use (default: `en_core_web_lg`)
 - `HF_REPO_ID`: Target HuggingFace repository
+- `ENABLE_CITATION_FETCHING`: Enable/disable citation fetching (default: True)
+- `CITATION_BATCH_SIZE`: Batch size for progress updates (default: 100)
+- `MULTI_CLASS_ENABLED`: Allow multiple classifications per paper (default: True)
+- `MULTI_CLASS_SCORE_THRESHOLD`: Include classes within 90% of top score (default: 0.90)
+- `MAX_CLASSIFICATIONS`: Maximum classifications per level (default: 5)
 
 ## 🧪 Testing Individual Modules
 
@@ -109,14 +117,20 @@ pip install -r requirements.txt
 
 ### Papers Pipeline - Additional Setup
 
-The papers pipeline requires the spaCy language model:
+The papers pipeline requires the spaCy language model and citation scraper:
 
 ```bash
 # Download the spaCy model (will auto-download if missing)
 python -m spacy download en_core_web_lg
+
+# Install paperscraper for citation tracking
+pip install paperscraper
 ```
 
-**Note**: The `en_core_web_lg` model is ~500MB. The pipeline will attempt to download it automatically if not found.
+**Notes**: 
+- The `en_core_web_lg` model is ~500MB and will auto-download if not found
+- `paperscraper` fetches citation counts from Semantic Scholar and Google Scholar
+- Citation fetching can be disabled by setting `ENABLE_CITATION_FETCHING = False` in config
 
 ## ☁️ HuggingFace Upload
 

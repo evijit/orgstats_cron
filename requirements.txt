@@ -8,3 +8,4 @@ psutil
 fastparquet
 spacy
 datasets
+semanticscholar
