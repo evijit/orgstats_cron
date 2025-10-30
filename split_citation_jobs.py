@@ -10,9 +10,9 @@ import math
 
 # Configuration
 # Optimized timing: Reused client, 5s timeout, 1s rate limit
-# Most successful queries return in 1-2s, timeouts are rare
-PAPERS_PER_JOB = 1000  # ~30-45 minutes per 1000 papers (2-3s avg per paper)
-AVG_TIME_PER_PAPER = 2.5  # seconds (optimized: reused client + fast API responses)
+# Conservative estimate: 200 papers per job to stay within safe time limits
+PAPERS_PER_JOB = 200  # Safe batch size, should finish in 10-20 minutes with optimization
+AVG_TIME_PER_PAPER = 3  # seconds (conservative: includes timeout edge cases)
 MAX_PARALLEL_JOBS = 20  # GitHub Actions limit for public repos
 
 def calculate_job_split(total_papers):

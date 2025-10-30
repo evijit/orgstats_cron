@@ -19,7 +19,7 @@ def generate_matrix_wave(total_papers, wave_number, jobs_per_wave):
     Returns:
         JSON array of job configs for this wave
     """
-    papers_per_job = 1000  # ~30-45 min per job (reused client, fast responses)
+    papers_per_job = 200  # Conservative batch size, optimized client should be fast
     total_jobs = math.ceil(total_papers / papers_per_job)
     
     # Calculate which jobs belong to this wave

@@ -329,8 +329,8 @@ def get_semantic_scholar_client():
     if _semantic_scholar_client is None:
         try:
             from semanticscholar import SemanticScholar
-            # Use 5s timeout - most successful queries return in 1-2s
-            _semantic_scholar_client = SemanticScholar(timeout=5)
+            # Use 15s timeout - balance between speed and success rate
+            _semantic_scholar_client = SemanticScholar(timeout=15)
         except ImportError:
             return None
     return _semantic_scholar_client
