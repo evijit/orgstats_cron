@@ -83,7 +83,7 @@ if __name__ == '__main__':
     from data_fetcher_papers import fetch_raw_data
     
     log_progress(f"Loading papers data...")
-    df = fetch_raw_data()
+    df, _ = fetch_raw_data()  # Unpack tuple (df, timestamp)
     
     log_progress(f"Total papers in dataset: {len(df):,}")
     

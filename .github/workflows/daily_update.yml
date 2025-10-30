@@ -125,7 +125,7 @@ jobs:
       id: split
       run: |
         # Fetch data to get count (capture only the last line which is the count)
-        PAPER_COUNT=$(python -c "from data_fetcher_papers import fetch_raw_data; df = fetch_raw_data(); print(len(df))" 2>&1 | tail -1)
+        PAPER_COUNT=$(python -c "from data_fetcher_papers import fetch_raw_data; df, _ = fetch_raw_data(); print(len(df))" 2>&1 | tail -1)
         echo "Total papers: $PAPER_COUNT"
         
         # Calculate job split and show info
