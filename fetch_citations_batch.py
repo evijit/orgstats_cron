@@ -38,11 +38,15 @@ def fetch_citations_batch(df, start_idx, end_idx):
     successful_fetches = 0
     start_time = time.time()
     
-    for i, row in df_subset.iterrows():
-        paper_id = row.get('paper_id', '')
-        paper_title = row.get('paper_title', '')
+    for idx, row in enumerate(df_subset.itertuples(), 1):
+        paper_id = getattr(row, 'paper_id', '')
+        paper_title = getattr(row, 'paper_title', '')
         
-        citations, ss_id = get_paper_citations(paper_id, paper_title)
+        # Log each paper being processed (with count)
+        log_progress(f"\n[{idx}/{len(df_subset)}] Paper ID: {paper_id}")
+        
+        # Fetch with detailed logging enabled
+        citations, ss_id = get_paper_citations(paper_id, paper_title, log_details=True)
         citation_counts.append(citations)
         semantic_scholar_ids.append(ss_id)
         
@@ -50,17 +54,16 @@ def fetch_citations_batch(df, start_idx, end_idx):
             successful_fetches += 1
         
         # Rate limiting
-        if i < len(df_subset) - 1:
+        if idx < len(df_subset):
             time.sleep(CITATION_RATE_LIMIT_DELAY)
         
-        # Progress updates
-        processed = len(citation_counts)
-        if processed % 100 == 0 or processed == len(df_subset):
+        # Progress updates every 10 papers
+        if idx % 10 == 0 or idx == len(df_subset):
             elapsed = time.time() - start_time
-            rate = processed / elapsed if elapsed > 0 else 0
-            eta = (len(df_subset) - processed) / rate if rate > 0 else 0
-            log_progress(f"   Progress: {processed:,}/{len(df_subset):,} " +
-                        f"({successful_fetches} found, {rate:.2f} papers/sec, ETA: {eta/60:.1f}min)")
+            rate = idx / elapsed if elapsed > 0 else 0
+            eta = (len(df_subset) - idx) / rate if rate > 0 else 0
+            log_progress(f"\n📊 Progress: {idx:,}/{len(df_subset):,} papers processed " +
+                        f"({successful_fetches} citations found, {rate:.2f} papers/sec, ETA: {eta/60:.1f}min)")
     
     df_subset['citation_count'] = citation_counts
     df_subset['semantic_scholar_id'] = semantic_scholar_ids

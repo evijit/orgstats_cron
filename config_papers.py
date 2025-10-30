@@ -72,7 +72,7 @@ FINAL_EXPECTED_COLUMNS = RAW_DATA_COLUMNS_TO_FETCH + [
 # Citation fetching settings
 ENABLE_CITATION_FETCHING = True  # Set to False to skip citation fetching
 CITATION_BATCH_SIZE = 100  # Process citations in batches to show progress
-CITATION_RATE_LIMIT_DELAY = 3  # Seconds between requests (100 req/5min = 20 req/min = 1 req/3sec)
+CITATION_RATE_LIMIT_DELAY = 1  # Seconds between requests (balanced for speed)
 MAX_PAPERS_FOR_CITATIONS = None  # None = all papers (parallel jobs handle time limits automatically)
 
 # Output file

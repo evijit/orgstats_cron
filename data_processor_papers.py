@@ -320,7 +320,7 @@ def setup_initial_dataframe(df_raw, data_download_timestamp):
     log_memory_usage()
     return df
 
-def get_paper_citations(paper_id, paper_title=None, paper_authors=None):
+def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_details=False):
     """
     Fetch citation count and Semantic Scholar ID for a paper.
     
@@ -331,6 +331,7 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None):
         paper_id: ArXiv paper ID (e.g., '2510.22236') - not used but kept for compatibility
         paper_title: Paper title
         paper_authors: Not used (kept for compatibility)
+        log_details: If True, log each paper's citation fetch result
         
     Returns:
         tuple: (citation_count, semantic_scholar_id) or (None, None) if unavailable
@@ -346,6 +347,11 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None):
             try:
                 query = paper_title.strip()
                 
+                if log_details:
+                    # Truncate title for display
+                    display_title = query[:80] + "..." if len(query) > 80 else query
+                    log_progress(f"🔍 Searching: {display_title}")
+                
                 # Search and get first result
                 results = sch.search_paper(query, limit=1)
                 
@@ -353,17 +359,34 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None):
                 for paper in results:
                     citation_count = paper.citationCount if paper.citationCount is not None else None
                     ss_paper_id = paper.paperId if hasattr(paper, 'paperId') else None
+                    
+                    if log_details:
+                        if citation_count is not None:
+                            log_progress(f"   ✅ Found: {citation_count:,} citations (ID: {ss_paper_id})")
+                        else:
+                            log_progress(f"   ⚠️  Found paper but no citation data (ID: {ss_paper_id})")
+                    
                     return (citation_count, ss_paper_id)
+                
+                # No results found
+                if log_details:
+                    log_progress(f"   ❌ Not found in Semantic Scholar")
                         
-            except Exception:
+            except Exception as e:
+                if log_details:
+                    log_progress(f"   ❌ Error: {str(e)[:100]}")
                 pass
         
         return (None, None)
         
     except ImportError:
         # semanticscholar not available
+        if log_details:
+            log_progress("   ❌ semanticscholar package not installed")
         return (None, None)
-    except Exception:
+    except Exception as e:
+        if log_details:
+            log_progress(f"   ❌ Unexpected error: {str(e)[:100]}")
         return (None, None)
 
 def fetch_citations(df):

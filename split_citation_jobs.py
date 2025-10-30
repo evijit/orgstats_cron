@@ -9,9 +9,11 @@ import sys
 import math
 
 # Configuration
-CITATION_RATE_LIMIT_DELAY = 3  # seconds per request
-MAX_JOB_TIME_MINUTES = 300  # 5 hours (leaving 1 hour buffer in 6hr limit)
-PAPERS_PER_JOB = int(MAX_JOB_TIME_MINUTES * 60 / CITATION_RATE_LIMIT_DELAY)
+# Note: Actual processing is ~90s per paper (API call + timeout + delay)
+# Observed: 200 papers in 5 hours
+PAPERS_PER_JOB = 200  # Based on observed performance: ~5 hours per 200 papers
+AVG_TIME_PER_PAPER = 90  # seconds (observed average including API time)
+MAX_PARALLEL_JOBS = 20  # GitHub Actions limit for public repos
 
 def calculate_job_split(total_papers):
     """
@@ -23,13 +25,18 @@ def calculate_job_split(total_papers):
     Returns:
         dict with job configuration
     """
-    num_jobs = math.ceil(total_papers / PAPERS_PER_JOB)
+    # Calculate ideal number of jobs
+    ideal_jobs = math.ceil(total_papers / PAPERS_PER_JOB)
+    # Cap at GitHub Actions concurrent limit
+    num_jobs = min(MAX_PARALLEL_JOBS, ideal_jobs)
+    # Recalculate papers per job if we hit the limit
+    actual_papers_per_job = math.ceil(total_papers / num_jobs)
     
     return {
         'total_papers': total_papers,
-        'papers_per_job': PAPERS_PER_JOB,
+        'papers_per_job': actual_papers_per_job,
         'num_jobs': num_jobs,
-        'estimated_time_per_job_minutes': (PAPERS_PER_JOB * CITATION_RATE_LIMIT_DELAY) / 60
+        'estimated_time_per_job_minutes': (actual_papers_per_job * AVG_TIME_PER_PAPER) / 60
     }
 
 def generate_job_matrix(total_papers):

@@ -140,7 +140,7 @@ jobs:
     name: "Fetch Citations (Job ${{ matrix.job_id }})"
     needs: papers-setup
     runs-on: ubuntu-latest
-    timeout-minutes: 330
+    timeout-minutes: 30
     strategy:
       matrix:
         include: ${{ fromJson(needs.papers-setup.outputs.matrix) }}
