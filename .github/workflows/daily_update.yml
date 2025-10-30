@@ -119,7 +119,7 @@ jobs:
     - name: Install dependencies
       run: |
         python -m pip install --upgrade pip
-        pip install pandas duckdb pyarrow
+        pip install -r requirements.txt
 
     - name: Fetch paper count and calculate job split
       id: split
