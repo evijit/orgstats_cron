@@ -70,7 +70,15 @@ FINAL_EXPECTED_COLUMNS = RAW_DATA_COLUMNS_TO_FETCH + [
 ]
 
 # Citation fetching settings
-ENABLE_CITATION_FETCHING = True  # Set to False to skip citation fetching
+import os
+
+# Allow runtime override from environment (workflow jobs set this env var);
+# Accepts '1','true','yes' (case-insensitive) as truthy values.
+_env_enable = os.environ.get('ENABLE_CITATION_FETCHING')
+if _env_enable is None:
+    ENABLE_CITATION_FETCHING = True
+else:
+    ENABLE_CITATION_FETCHING = str(_env_enable).strip().lower() in ('1', 'true', 'yes')
 CITATION_BATCH_SIZE = 100  # Process citations in batches to show progress
 
 # Semantic Scholar via Python package (handles rate limiting internally)
