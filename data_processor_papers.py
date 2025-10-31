@@ -474,6 +474,7 @@ def fetch_citations(df):
         log_progress("⚠️  Citation fetching is disabled. Skipping...")
         df['citation_count'] = None
         df['semantic_scholar_id'] = None
+        df['citation_fetch_date'] = None
         return df
     
     total_papers = len(df)
@@ -498,6 +499,7 @@ def fetch_citations(df):
     start_time = time.time()
     citation_counts = []
     semantic_scholar_ids = []
+    fetch_dates = []
     successful_fetches = 0
     
     for i, row in df.iterrows():
@@ -507,14 +509,16 @@ def fetch_citations(df):
             remaining = total_papers - papers_to_process
             citation_counts.extend([None] * remaining)
             semantic_scholar_ids.extend([None] * remaining)
+            fetch_dates.extend([None] * remaining)
             break
         
         paper_id = row.get('paper_id', '')
         paper_title = row.get('paper_title', '')
         
-        citations, ss_id = get_paper_citations(paper_id, paper_title)
+        citations, ss_id, fetch_date = get_paper_citations(paper_id, paper_title)
         citation_counts.append(citations)
         semantic_scholar_ids.append(ss_id)
+        fetch_dates.append(fetch_date)
         
         if citations is not None:
             successful_fetches += 1
@@ -533,6 +537,7 @@ def fetch_citations(df):
     
     df['citation_count'] = citation_counts
     df['semantic_scholar_id'] = semantic_scholar_ids
+    df['citation_fetch_date'] = fetch_dates
     
     elapsed_time = time.time() - start_time
     log_progress(f"✅ Citation fetching completed in {elapsed_time/60:.1f} minutes")
