@@ -47,14 +47,32 @@ def fetch_citations_batch(df, start_idx, end_idx, previous_data=None):
     
     # Build lookup for previous data
     previous_lookup = {}
-    if previous_data is not None and 'citation_fetch_date' in previous_data.columns:
+    if previous_data is not None:
+        # Handle case where citation_fetch_date doesn't exist yet (first run with new system)
+        has_fetch_dates = 'citation_fetch_date' in previous_data.columns
+        
         for _, row in previous_data.iterrows():
-            if pd.notna(row.get('citation_fetch_date')) and pd.notna(row.get('citation_count')):
-                previous_lookup[row['paper_id']] = {
-                    'citation_count': row['citation_count'],
-                    'semantic_scholar_id': row.get('semantic_scholar_id'),
-                    'fetch_date': row['citation_fetch_date']
-                }
+            paper_id = row['paper_id']
+            
+            # If we have fetch dates, only cache fresh ones
+            if has_fetch_dates:
+                if pd.notna(row.get('citation_fetch_date')) and pd.notna(row.get('citation_count')):
+                    previous_lookup[paper_id] = {
+                        'citation_count': row['citation_count'],
+                        'semantic_scholar_id': row.get('semantic_scholar_id'),
+                        'fetch_date': row['citation_fetch_date']
+                    }
+            else:
+                # First run: treat all existing citations as "old" (need refresh)
+                # But keep the semantic_scholar_id for faster lookups
+                if pd.notna(row.get('semantic_scholar_id')):
+                    previous_lookup[paper_id] = {
+                        'semantic_scholar_id': row.get('semantic_scholar_id'),
+                        'fetch_date': None  # Mark as needing refresh
+                    }
+        
+        if not has_fetch_dates:
+            log_progress(f"   ⚠️  No fetch dates in previous data - will fetch all but use existing IDs for speed")
     
     # Calculate cutoff date (7 days ago)
     cutoff_date = (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')
@@ -68,8 +86,8 @@ def fetch_citations_batch(df, start_idx, end_idx, previous_data=None):
         
         # Check if we have fresh data (< 7 days old)
         if paper_id in previous_lookup:
-            prev_fetch_date = previous_lookup[paper_id]['fetch_date']
-            if prev_fetch_date >= cutoff_date:
+            prev_fetch_date = previous_lookup[paper_id].get('fetch_date')
+            if prev_fetch_date and prev_fetch_date >= cutoff_date:
                 # Data is fresh, reuse it
                 log_progress(f"   ♻️  Using cached data (fetched {prev_fetch_date})")
                 citation_counts.append(previous_lookup[paper_id]['citation_count'])
@@ -86,8 +104,18 @@ def fetch_citations_batch(df, start_idx, end_idx, previous_data=None):
             semantic_scholar_ids.append(None)
             fetch_dates.append(None)
         else:
+            # Get existing semantic_scholar_id if available (for faster lookup)
+            existing_ss_id = None
+            if paper_id in previous_lookup:
+                existing_ss_id = previous_lookup[paper_id].get('semantic_scholar_id')
+            
             # Fetch with detailed logging enabled
-            citations, ss_id, fetch_date = get_paper_citations(paper_id, paper_title, log_details=True)
+            # Pass existing SS ID for faster lookup (by ID instead of title search)
+            citations, ss_id, fetch_date = get_paper_citations(
+                paper_id, paper_title, 
+                log_details=True, 
+                semantic_scholar_id=existing_ss_id
+            )
             citation_counts.append(citations)
             semantic_scholar_ids.append(ss_id)
             fetch_dates.append(fetch_date)

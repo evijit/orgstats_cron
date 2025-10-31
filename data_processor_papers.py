@@ -320,18 +320,21 @@ def setup_initial_dataframe(df_raw, data_download_timestamp):
     log_memory_usage()
     return df
 
-def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_details=False):
+def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_details=False, semantic_scholar_id=None):
     """
     Fetch citation count and Semantic Scholar ID for a paper.
     
     Uses semanticscholar Python package with timeout handling.
     More reliable than REST API for batch processing despite being slower.
     
+    Optimization: If semantic_scholar_id is provided, fetches directly by ID (much faster than title search).
+    
     Args:
         paper_id: ArXiv paper ID (e.g., '2510.22236') - not used but kept for compatibility
         paper_title: Paper title
         paper_authors: Not used (kept for compatibility)
         log_details: If True, log each paper's citation fetch result
+        semantic_scholar_id: If provided, fetch directly by ID (faster)
         
     Returns:
         tuple: (citation_count, semantic_scholar_id, fetch_date) or (None, None, None) if unavailable
@@ -341,6 +344,7 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
         from semanticscholar import SemanticScholar
         from semanticscholar.SemanticScholarException import ObjectNotFoundException
         import signal
+        from datetime import datetime
         
         # Timeout handler
         class TimeoutException(Exception):
@@ -349,7 +353,52 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
         def timeout_handler(signum, frame):
             raise TimeoutException()
         
-        # Search by title only
+        sch = SemanticScholar()
+        
+        # OPTIMIZATION: If we have Semantic Scholar ID, fetch directly (much faster!)
+        if semantic_scholar_id and isinstance(semantic_scholar_id, str) and semantic_scholar_id.strip():
+            try:
+                if log_details:
+                    log_progress(f"🔍 Fetching by ID: {semantic_scholar_id[:20]}...")
+                
+                # Set timeout to 30 seconds (ID lookup is faster than search)
+                signal.signal(signal.SIGALRM, timeout_handler)
+                signal.alarm(30)
+                
+                try:
+                    paper = sch.get_paper(semantic_scholar_id)
+                    
+                    # Cancel the alarm
+                    signal.alarm(0)
+                    
+                    if paper:
+                        citation_count = paper.citationCount if hasattr(paper, 'citationCount') else None
+                        ss_paper_id = paper.paperId if hasattr(paper, 'paperId') else semantic_scholar_id
+                        fetch_date = datetime.now().strftime('%Y-%m-%d')
+                        
+                        if log_details:
+                            if citation_count is not None:
+                                log_progress(f"   ✅ Found: {citation_count:,} citations (by ID)")
+                            else:
+                                log_progress(f"   ⚠️  Found paper but no citation data (by ID)")
+                        
+                        return (citation_count, ss_paper_id, fetch_date)
+                    
+                except TimeoutException:
+                    signal.alarm(0)
+                    if log_details:
+                        log_progress(f"   ⚠️  Timeout fetching by ID (30s)")
+                except ObjectNotFoundException:
+                    signal.alarm(0)
+                    if log_details:
+                        log_progress(f"   ⚠️  ID not found, falling back to title search")
+                        
+            except Exception as e:
+                signal.alarm(0)
+                if log_details:
+                    log_progress(f"   ⚠️  Error fetching by ID: {str(e)[:100]}")
+        
+        # Fallback to title search if no ID or ID lookup failed
         if paper_title and isinstance(paper_title, str) and paper_title.strip():
             try:
                 query = paper_title.strip()
@@ -364,7 +413,6 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
                 signal.alarm(90)
                 
                 try:
-                    sch = SemanticScholar()
                     results = sch.search_paper(query, limit=1)
                     
                     # Cancel the alarm
@@ -374,9 +422,6 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
                         paper = results[0]
                         citation_count = paper.citationCount if hasattr(paper, 'citationCount') else None
                         ss_paper_id = paper.paperId if hasattr(paper, 'paperId') else None
-                        
-                        # Get current date for successful fetch
-                        from datetime import datetime
                         fetch_date = datetime.now().strftime('%Y-%m-%d')
                         
                         if log_details:
