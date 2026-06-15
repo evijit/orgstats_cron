@@ -191,6 +191,7 @@ jobs:
     - name: Fetch citations for batch
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        HF_STARTUP_JITTER: '1'
       run: |
         python fetch_citations_batch.py ${{ matrix.start_idx }} ${{ matrix.end_idx }}
 
@@ -259,6 +260,7 @@ jobs:
     - name: Fetch citations for batch
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        HF_STARTUP_JITTER: '1'
       run: |
         python fetch_citations_batch.py ${{ matrix.start_idx }} ${{ matrix.end_idx }}
 
@@ -330,6 +332,7 @@ jobs:
     - name: Fetch citations for batch
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        HF_STARTUP_JITTER: '1'
       run: |
         python fetch_citations_batch.py ${{ matrix.start_idx }} ${{ matrix.end_idx }}
 
@@ -401,6 +404,7 @@ jobs:
     - name: Fetch citations for batch
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        HF_STARTUP_JITTER: '1'
       run: |
         python fetch_citations_batch.py ${{ matrix.start_idx }} ${{ matrix.end_idx }}
 

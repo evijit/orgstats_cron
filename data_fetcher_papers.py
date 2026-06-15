@@ -22,49 +22,49 @@ def fetch_raw_data():
     log_progress("🚀 Starting PAPERS data fetch from Hugging Face")
     log_progress(f"Source URL: {HF_PARQUET_URL}")
 
-    # Random startup jitter to stagger concurrent parallel jobs
-    jitter = random.uniform(0, 20)
-    log_progress(f"⏳ Startup jitter: waiting {jitter:.1f}s to reduce parallel request collisions...")
-    time.sleep(jitter)
+    # Startup jitter: only applied by parallel wave jobs (HF_STARTUP_JITTER=1)
+    if os.environ.get('HF_STARTUP_JITTER') == '1':
+        jitter = random.uniform(0, 20)
+        log_progress(f"⏳ Startup jitter: waiting {jitter:.1f}s to reduce parallel request collisions...")
+        time.sleep(jitter)
 
     fetch_start_time = time.time()
-    
+
     try:
         columns_to_select = ", ".join(f'"{col}"' for col in RAW_DATA_COLUMNS_TO_FETCH)
         query = f"SELECT {columns_to_select} FROM read_parquet('{HF_PARQUET_URL}')"
         log_progress(f"Optimized query will fetch {len(RAW_DATA_COLUMNS_TO_FETCH)} specific columns.")
-        
+
         limit = os.environ.get('TEST_DATA_LIMIT')
         if limit and limit.isdigit():
             query += f" LIMIT {int(limit)}"
             log_progress(f"🧪 Applying test limit: Fetching only {limit} rows.")
 
-        # Configure DuckDB connection with built-in HTTP retry support
-        conn = duckdb.connect()
-        hf_token = os.environ.get('HF_TOKEN')
-        if hf_token:
-            # Use httpfs bearer_token for authenticated requests (higher rate limits)
-            try:
-                conn.execute("INSTALL httpfs; LOAD httpfs;")
-                conn.execute(f"CREATE OR REPLACE SECRET hf_secret (TYPE HTTP, BEARER_TOKEN '{hf_token}');")
-                log_progress("🔑 Using HF_TOKEN for authenticated HuggingFace access.")
-            except Exception as secret_err:
-                log_progress(f"⚠️  Could not set HF_TOKEN on DuckDB connection: {secret_err}")
+        with duckdb.connect() as conn:
+            hf_token = os.environ.get('HF_TOKEN')
+            if hf_token:
+                try:
+                    conn.execute("INSTALL httpfs; LOAD httpfs;")
+                    # Parameterized to avoid token being interpolated into SQL
+                    conn.execute("CREATE OR REPLACE SECRET hf_secret (TYPE HTTP, BEARER_TOKEN ?);", [hf_token])
+                    log_progress("🔑 Using HF_TOKEN for authenticated HuggingFace access.")
+                except Exception:
+                    log_progress("⚠️  Could not configure HF_TOKEN for DuckDB connection; proceeding unauthenticated.")
 
-        log_progress("⏳ Executing DuckDB query to fetch remote papers data...")
-        df_raw = None
-        for attempt in range(_MAX_FETCH_RETRIES):
-            try:
-                df_raw = conn.execute(query).df()
-                break
-            except Exception as e:
-                if '429' in str(e) and attempt < _MAX_FETCH_RETRIES - 1:
-                    delay = _FETCH_BASE_DELAY * (2 ** attempt) + random.uniform(0, 15)
-                    log_progress(f"⏳ Rate limited (HTTP 429). Retrying in {delay:.1f}s "
-                                 f"(attempt {attempt + 1}/{_MAX_FETCH_RETRIES})...")
-                    time.sleep(delay)
-                else:
-                    raise
+            log_progress("⏳ Executing DuckDB query to fetch remote papers data...")
+            df_raw = None
+            for attempt in range(_MAX_FETCH_RETRIES):
+                try:
+                    df_raw = conn.execute(query).df()
+                    break
+                except Exception as e:
+                    if '429' in str(e) and attempt < _MAX_FETCH_RETRIES - 1:
+                        delay = _FETCH_BASE_DELAY * (2 ** attempt) + random.uniform(0, 15)
+                        log_progress(f"⏳ Rate limited (HTTP 429). Retrying in {delay:.1f}s "
+                                     f"(attempt {attempt + 1}/{_MAX_FETCH_RETRIES})...")
+                        time.sleep(delay)
+                    else:
+                        raise
 
         data_download_timestamp = pd.Timestamp.now(tz='UTC')
         
