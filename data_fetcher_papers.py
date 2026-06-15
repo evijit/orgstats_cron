@@ -2,20 +2,31 @@
 """Module for fetching papers data from Hugging Face."""
 
 import os
+import random
 import time
 import duckdb
 import pandas as pd
 from utils import log_progress, log_memory_usage
 from config_papers import HF_PARQUET_URL, RAW_DATA_COLUMNS_TO_FETCH
 
+_MAX_FETCH_RETRIES = 6
+_FETCH_BASE_DELAY = 30  # seconds
+
+
 def fetch_raw_data():
     """
     Fetch raw papers data from Hugging Face, selecting only necessary columns.
     Respects 'TEST_DATA_LIMIT' environment variable for testing.
+    Retries with exponential backoff on HTTP 429 (rate limit) errors.
     """
     log_progress("🚀 Starting PAPERS data fetch from Hugging Face")
     log_progress(f"Source URL: {HF_PARQUET_URL}")
-    
+
+    # Random startup jitter to stagger concurrent parallel jobs
+    jitter = random.uniform(0, 20)
+    log_progress(f"⏳ Startup jitter: waiting {jitter:.1f}s to reduce parallel request collisions...")
+    time.sleep(jitter)
+
     fetch_start_time = time.time()
     
     try:
@@ -27,9 +38,34 @@ def fetch_raw_data():
         if limit and limit.isdigit():
             query += f" LIMIT {int(limit)}"
             log_progress(f"🧪 Applying test limit: Fetching only {limit} rows.")
-            
+
+        # Configure DuckDB connection with built-in HTTP retry support
+        conn = duckdb.connect()
+        hf_token = os.environ.get('HF_TOKEN')
+        if hf_token:
+            # Use httpfs bearer_token for authenticated requests (higher rate limits)
+            try:
+                conn.execute("INSTALL httpfs; LOAD httpfs;")
+                conn.execute(f"CREATE OR REPLACE SECRET hf_secret (TYPE HTTP, BEARER_TOKEN '{hf_token}');")
+                log_progress("🔑 Using HF_TOKEN for authenticated HuggingFace access.")
+            except Exception as secret_err:
+                log_progress(f"⚠️  Could not set HF_TOKEN on DuckDB connection: {secret_err}")
+
         log_progress("⏳ Executing DuckDB query to fetch remote papers data...")
-        df_raw = duckdb.sql(query).df()
+        df_raw = None
+        for attempt in range(_MAX_FETCH_RETRIES):
+            try:
+                df_raw = conn.execute(query).df()
+                break
+            except Exception as e:
+                if '429' in str(e) and attempt < _MAX_FETCH_RETRIES - 1:
+                    delay = _FETCH_BASE_DELAY * (2 ** attempt) + random.uniform(0, 15)
+                    log_progress(f"⏳ Rate limited (HTTP 429). Retrying in {delay:.1f}s "
+                                 f"(attempt {attempt + 1}/{_MAX_FETCH_RETRIES})...")
+                    time.sleep(delay)
+                else:
+                    raise
+
         data_download_timestamp = pd.Timestamp.now(tz='UTC')
         
         fetch_time = time.time() - fetch_start_time
