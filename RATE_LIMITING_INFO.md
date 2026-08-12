@@ -33,9 +33,9 @@ With the workflow's 15-way fan-out, that is **17.25s between requests in each
 job**, for an expected aggregate of **0.87 req/s** — just under the ceiling.
 
 - `config_papers.py` computes `SS_MIN_REQUEST_INTERVAL` from
-  `CITATION_JOB_CONCURRENCY`, which the workflow sets to the wave's `max-parallel`.
-  **If you change `max-parallel`, that env var must change with it** or the run
-  will exceed the limit.
+  `CITATION_JOB_CONCURRENCY`. The workflow feeds that and `max-parallel` from the
+  single `CITATION_CONCURRENCY` env var, so the two cannot drift apart and quietly
+  blow the limit.
 - `data_processor_papers.py` calls `throttle_semantic_scholar_request()` before
   every request, and reuses one authenticated client per process.
 
@@ -45,18 +45,16 @@ jobs can fire in the same second. The `semanticscholar` package turns a 429 into
 
 ### A note on fan-out geometry
 
-Under a global rate ceiling, parallelism no longer buys throughput. A wave's
-duration depends only on how many papers are in it:
+Under a global rate ceiling, parallelism does not buy throughput. Total run time
+depends only on how many live requests the run makes:
 
 ```
-wave_duration ≈ papers_per_wave * 1.15 seconds
+run_duration ≈ live_requests * 1.15 seconds
 ```
 
-...whichever way those papers are split across jobs. 15 jobs × 200 papers and
-5 jobs × 600 papers take the same wall-clock time; the second just uses a third of
-the runner minutes. `PAPERS_PER_JOB` and `JOBS_PER_WAVE` in the workflow env are
-the two knobs, and both `calculate_waves.py` and `generate_matrix_wave.py` take
-them as parameters so they cannot drift apart.
+...however those requests are split across jobs. Concurrency only changes how long
+each individual job takes, which matters solely for the 6-hour job timeout. See
+[PAPERS_CITATION_FANOUT.md](PAPERS_CITATION_FANOUT.md) for how batches are sized.
 
 ## Timing
 
@@ -64,10 +62,10 @@ Per-request cost is ~17.25s of deliberate spacing. Papers whose citations were
 fetched within the last 7 days are served from cache and cost nothing (see the
 smart-caching logic in `fetch_citations_batch.py`).
 
-| Scenario | Live fetches | Per wave | 6 waves total |
+| Scenario | Live fetches | Per job | Whole run |
 |---|---|---|---|
-| Cold cache (worst case) | 200 per job | ~58 min | **~5.8 h** |
-| Steady state (7-day cache) | ~29 per job | ~10 min | **~1 h** |
+| Cold cache (worst case) | ~16,985 | ~1.0 h | **~5.4 h** |
+| Steady state (7-day cache) | ~2,400 | ~9 min | **~45 min** |
 
 For reference, before the key and the snapshot fix, a run took ~8 hours and
 covered only 12,000 of 16,985 papers, because live fetches were costing ~65s each
