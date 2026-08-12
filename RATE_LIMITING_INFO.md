@@ -1,138 +1,97 @@
 # Semantic Scholar API Rate Limiting
 
-## Current Status
+Citation counts come from the Semantic Scholar API. That API is the slowest part of
+the papers pipeline by a wide margin, so the pacing below is what determines how
+long a daily run takes.
 
-The citation fetching feature uses the Semantic Scholar API to retrieve citation counts for papers. Understanding and respecting rate limits is critical for the workflow to function properly.
+## The limit
 
-## Official Rate Limits
+**With our API key: 1 request per second, cumulative across all endpoints.**
 
-**Without API Key:** 100 requests per 5 minutes
-- Average: 1 request every 3 seconds
-- Sliding window (previous requests count toward the limit)
+"Cumulative" is the important word. The ceiling is *not* per process, per job, or
+per endpoint — every request the pipeline makes anywhere counts against the same
+1 req/s budget. Fifteen parallel jobs each sending 1 req/s is 15 req/s, and the
+overwhelming majority of those get rejected.
 
-**With API Key:** 5,000 requests per 5 minutes
-- Average: ~16 requests per second
-- Much more suitable for large-scale batch processing
+(Without a key, requests fall back to a shared unauthenticated pool — roughly
+100 requests per 5 minutes, shared with everyone else on the internet.)
 
-## Current Implementation
+The key is stored as the `SEMANTIC_SCHOLAR_KEY` repository secret and is sent as
+the `x-api-key` header. That is the only name the code reads, in both the workflow
+and locally.
 
-### Strategy
-- **5 seconds between ALL requests** (conservative approach)
-- **30 second wait on 429 errors** with single retry
-- **10 second timeout** per request
-- **Skip papers without titles** to avoid wasted API calls
+## How the budget is divided
 
-### Code Locations
-- `data_processor_papers.py`: Core `get_paper_citations()` function with retry logic
-- `fetch_citations_batch.py`: Batch processing with 5s delays between requests
-- `config_papers.py`: `CITATION_RATE_LIMIT_DELAY = 5` setting
+Because the ceiling is global and parallel jobs cannot coordinate, each job paces
+itself to its *share* of the budget:
 
-## Performance Estimates
-
-### Without API Key (Current)
-For **200 papers per job**:
-- Time: ~1,800 seconds = **30 minutes per job**
-- Success rate: ~70-80% (may vary based on rate limit accumulation)
-- GitHub Actions limit: 6 hours per job ✅ (plenty of headroom)
-
-For **10,556 total papers** across 53 jobs:
-- Total time: ~26.5 hours (distributed across parallel jobs)
-- With 15 parallel jobs per wave: ~2 hours per wave
-- 4 waves sequentially: ~**8 hours total**
-
-### With API Key (Recommended)
-For **200 papers per job**:
-- Time: ~400 seconds = **6-7 minutes per job**
-- Success rate: ~100%
-- Much faster and more reliable
-
-For **10,556 total papers**:
-- Total time: ~5-6 hours (distributed)
-- With 15 parallel jobs per wave: ~25-30 minutes per wave
-- 4 waves sequentially: ~**2 hours total**
-
-## Testing Procedure
-
-### Before Production Deployment
-
-1. **Wait for rate limit reset**: 5+ minutes since last API call
-2. **Run fresh test**: `python test_rate_limit_fresh.py`
-3. **Verify success rate**: Should be 100% for 5 test papers
-4. **If successful**: Deploy to production workflow
-5. **If rate limited**: Wait longer or get API key
-
-### Local Testing
-```bash
-# Wait 5+ minutes for fresh start
-python test_rate_limit_fresh.py
-
-# Test small batch (will take ~90 seconds for 10 papers)
-python fetch_citations_batch.py 0 10
-
-# Check results
-python -c "import pandas as pd; df = pd.read_parquet('citations_batch_0_10.parquet'); print(df[['paper_id', 'citation_count']].to_string())"
+```
+interval_per_job = (jobs_running_in_parallel / 1.0 req_per_sec) * 1.15 safety_factor
 ```
 
-## Options for Production
+With the workflow's 15-way fan-out, that is **17.25s between requests in each
+job**, for an expected aggregate of **0.87 req/s** — just under the ceiling.
 
-### Option 1: Current Strategy (No API Key)
-✅ **Pros:**
-- No API key needed
-- Free
-- Works immediately
+- `config_papers.py` computes `SS_MIN_REQUEST_INTERVAL` from
+  `CITATION_JOB_CONCURRENCY`, which the workflow sets to the wave's `max-parallel`.
+  **If you change `max-parallel`, that env var must change with it** or the run
+  will exceed the limit.
+- `data_processor_papers.py` calls `throttle_semantic_scholar_request()` before
+  every request, and reuses one authenticated client per process.
 
-❌ **Cons:**
-- Slower (~8 hours total)
-- 70-80% success rate (some papers may be skipped)
-- Vulnerable to rate limit accumulation
+Throttling to the *expected* rate still allows occasional collisions, since two
+jobs can fire in the same second. The `semanticscholar` package turns a 429 into a
+30-second wait and retries up to 10 times, which absorbs those.
 
-**Recommended for:** Small datasets, testing, or if API key is not available
+### A note on fan-out geometry
 
-### Option 2: Get Semantic Scholar API Key (Recommended)
-✅ **Pros:**
-- 50x higher rate limit (5,000 req/5min)
-- ~100% success rate
-- Faster (~2 hours total)
-- More reliable
+Under a global rate ceiling, parallelism no longer buys throughput. A wave's
+duration depends only on how many papers are in it:
 
-❌ **Cons:**
-- Requires API key registration
-- Need to add key to GitHub Secrets
+```
+wave_duration ≈ papers_per_wave * 1.15 seconds
+```
 
-**How to get API key:**
-1. Visit: https://www.semanticscholar.org/product/api
-2. Register for API key (free, academic use)
-3. Add to GitHub Secrets as `SEMANTIC_SCHOLAR_API_KEY`
-4. Update `data_processor_papers.py` to include header:
-   ```python
-   headers = {"x-api-key": os.environ.get("SEMANTIC_SCHOLAR_API_KEY")}
-   response = requests.get(url, params=params, headers=headers, timeout=10)
-   ```
+...whichever way those papers are split across jobs. 15 jobs × 200 papers and
+5 jobs × 600 papers take the same wall-clock time; the second just uses a third of
+the runner minutes. `PAPERS_PER_JOB` and `JOBS_PER_WAVE` in the workflow env are
+the two knobs, and both `calculate_waves.py` and `generate_matrix_wave.py` take
+them as parameters so they cannot drift apart.
 
-**Recommended for:** Production deployments, large datasets
+## Timing
 
-### Option 3: Alternative Citation Sources
-Consider other APIs with different rate limits:
-- **OpenAlex**: More generous rate limits
-- **Crossref**: Academic citation database
-- **Google Scholar** (via unofficial APIs): Higher limits but less reliable
+Per-request cost is ~17.25s of deliberate spacing. Papers whose citations were
+fetched within the last 7 days are served from cache and cost nothing (see the
+smart-caching logic in `fetch_citations_batch.py`).
 
-## Production Readiness Checklist
+| Scenario | Live fetches | Per wave | 6 waves total |
+|---|---|---|---|
+| Cold cache (worst case) | 200 per job | ~58 min | **~5.8 h** |
+| Steady state (7-day cache) | ~29 per job | ~10 min | **~1 h** |
 
-- [x] REST API implementation (faster than Python package)
-- [x] Conservative 5s delays between requests
-- [x] Retry logic on 429 errors (30s wait)
-- [x] Skip papers without titles
-- [x] Detailed logging for monitoring
-- [x] 4-wave parallel processing (15+15+15+8 jobs)
-- [x] All waves in single daily_update.yml workflow
-- [ ] **Fresh rate limit test** (run `test_rate_limit_fresh.py`)
-- [ ] **Small batch validation** (10-20 papers)
-- [ ] **Decision**: With or without API key?
-- [ ] **If using API key**: Add to GitHub Secrets and update code
+For reference, before the key and the snapshot fix, a run took ~8 hours and
+covered only 12,000 of 16,985 papers, because live fetches were costing ~65s each
+to rate-limit collisions.
 
-## Current Blocking Issue
+## Local testing
 
-**Rate limit accumulation from testing:** Previous local test runs have used up rate limit quota. Need to wait 5+ minutes for full reset before validating the production strategy.
+```bash
+export SEMANTIC_SCHOLAR_KEY=...          # otherwise the unauthenticated pool is used
+export CITATION_JOB_CONCURRENCY=1        # running alone: use the whole budget
 
-**Next Step:** Run `test_rate_limit_fresh.py` after waiting for rate limit reset to confirm 5-second delays work consistently.
+# Small batch. At concurrency=1 the spacing is 1.15s per request.
+python fetch_citations_batch.py 0 10
+
+python -c "import pandas as pd; df = pd.read_parquet('citations_batch_0_10.parquet'); print(df[['paper_id','citation_count','citation_fetch_date']].to_string())"
+```
+
+If a run-local `papers_raw.parquet` snapshot is present it is reused instead of
+re-downloading from HuggingFace; see `fetch_papers_snapshot.py`.
+
+## Alternative sources
+
+If the 1 req/s ceiling ever becomes the binding constraint on coverage, these have
+more generous limits:
+
+- **OpenAlex** — most generous, has citation counts
+- **Crossref** — academic citation database

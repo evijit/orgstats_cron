@@ -81,12 +81,30 @@ else:
     ENABLE_CITATION_FETCHING = str(_env_enable).strip().lower() in ('1', 'true', 'yes')
 CITATION_BATCH_SIZE = 100  # Process citations in batches to show progress
 
-# Semantic Scholar via Python package (handles rate limiting internally)
-# Takes ~90 seconds per paper but is more reliable than REST API
-# For 200 papers: ~5 hours per job (well within GitHub Actions 6-hour limit)
-CITATION_RATE_LIMIT_DELAY = 0  # Package handles rate limiting internally
+CITATION_RATE_LIMIT_DELAY = 0  # Superseded by the request-level throttle below
 
 MAX_PAPERS_FOR_CITATIONS = None  # None = all papers (parallel jobs handle time limits automatically)
+
+# --- Semantic Scholar API ---
+# From the SEMANTIC_SCHOLAR_KEY repository secret; sent as the x-api-key header by
+# the semanticscholar package.
+SEMANTIC_SCHOLAR_KEY = os.environ.get('SEMANTIC_SCHOLAR_KEY') or None
+
+# The key allows 1 request per second CUMULATIVE across all endpoints - and that
+# ceiling is shared by every job running at once, not granted to each one. So the
+# per-process interval is the global budget divided by how many jobs are running
+# in parallel. CITATION_JOB_CONCURRENCY must match the workflow's max-parallel.
+SS_GLOBAL_RATE_LIMIT_RPS = 1.0
+SS_RATE_LIMIT_SAFETY = 1.15  # aim just under the ceiling; jobs can't coordinate
+CITATION_JOB_CONCURRENCY = max(1, int(os.environ.get('CITATION_JOB_CONCURRENCY', '1')))
+SS_MIN_REQUEST_INTERVAL = (CITATION_JOB_CONCURRENCY / SS_GLOBAL_RATE_LIMIT_RPS) * SS_RATE_LIMIT_SAFETY
+
+# Per-request ceilings. Generous enough that the package's own 429 handling (a 30s
+# wait, up to 10 attempts) can complete a retry instead of being cut short by the
+# SIGALRM guard, which would otherwise burn a second request on a needless retry.
+SS_REQUEST_TIMEOUT = 30    # passed to the client, per HTTP call
+SS_ID_LOOKUP_TIMEOUT = 90  # wall-clock guard for a lookup by ID
+SS_SEARCH_TIMEOUT = 150    # wall-clock guard for a title search
 
 # Output file
 PROCESSED_PARQUET_FILE_PATH = 'papers_with_semantic_taxonomy.parquet'

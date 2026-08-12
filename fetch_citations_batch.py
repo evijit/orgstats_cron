@@ -160,22 +160,38 @@ if __name__ == '__main__':
     
     log_progress(f"Total papers in dataset: {len(df):,}")
     
-    # Try to load previous data for smart caching
+    # Try to load previous data for smart caching. Prefer the copy the setup job
+    # already downloaded for this run — 60 parallel jobs each pulling it from
+    # HuggingFace is what got the run rate-limited in the first place.
     previous_data = None
     try:
         import os
-        from huggingface_hub import hf_hub_download
-        
-        log_progress("Loading previous citation data from HuggingFace...")
-        hf_token = os.environ.get('HF_TOKEN')
-        previous_file = hf_hub_download(
-            repo_id='evijit/paperverse_daily_data',
-            filename='papers_with_semantic_taxonomy.parquet',
-            repo_type='dataset',
-            token=hf_token
-        )
-        previous_data = pd.read_parquet(previous_file)
-        
+
+        shared_previous_file = os.environ.get('PAPERS_PREVIOUS_FILE', 'previous_citations.parquet')
+        shared_data = None
+        if os.path.exists(shared_previous_file):
+            log_progress(f"Loading previous citation data from {shared_previous_file}...")
+            shared_data = pd.read_parquet(shared_previous_file)
+            if shared_data.empty:
+                # Placeholder written when the setup job could not reach HuggingFace.
+                log_progress("   Shared cache file is empty - falling back to HuggingFace.")
+                shared_data = None
+
+        if shared_data is not None:
+            previous_data = shared_data
+        else:
+            from huggingface_hub import hf_hub_download
+
+            log_progress("Loading previous citation data from HuggingFace...")
+            hf_token = os.environ.get('HF_TOKEN')
+            previous_file = hf_hub_download(
+                repo_id='evijit/paperverse_daily_data',
+                filename='papers_with_semantic_taxonomy.parquet',
+                repo_type='dataset',
+                token=hf_token
+            )
+            previous_data = pd.read_parquet(previous_file)
+
         if 'citation_fetch_date' in previous_data.columns:
             fresh_count = (previous_data['citation_fetch_date'] >= 
                           (datetime.now() - timedelta(days=7)).strftime('%Y-%m-%d')).sum()

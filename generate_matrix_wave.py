@@ -7,19 +7,20 @@ import sys
 import json
 import math
 
-def generate_matrix_wave(total_papers, wave_number, jobs_per_wave):
+def generate_matrix_wave(total_papers, wave_number, jobs_per_wave, papers_per_job=200):
     """
     Generate job matrix for a specific wave.
-    
+
     Args:
         total_papers: Total number of papers to process
         wave_number: Which wave (0-based)
         jobs_per_wave: Number of jobs per wave
-        
+        papers_per_job: Papers per job - must match the value passed to
+            calculate_waves.py, or the waves won't cover the whole dataset
+
     Returns:
         JSON array of job configs for this wave
     """
-    papers_per_job = 200  # Conservative batch size, optimized client should be fast
     total_jobs = math.ceil(total_papers / papers_per_job)
     
     # Calculate which jobs belong to this wave
@@ -40,12 +41,14 @@ def generate_matrix_wave(total_papers, wave_number, jobs_per_wave):
 
 if __name__ == '__main__':
     if len(sys.argv) < 4:
-        print("Usage: python generate_matrix_wave.py <total_papers> <wave_number> <jobs_per_wave>")
+        print("Usage: python generate_matrix_wave.py <total_papers> <wave_number> "
+              "<jobs_per_wave> [papers_per_job]")
         sys.exit(1)
-    
+
     total_papers = int(sys.argv[1])
     wave_number = int(sys.argv[2])
     jobs_per_wave = int(sys.argv[3])
-    
-    matrix = generate_matrix_wave(total_papers, wave_number, jobs_per_wave)
+    papers_per_job = int(sys.argv[4]) if len(sys.argv) > 4 else 200
+
+    matrix = generate_matrix_wave(total_papers, wave_number, jobs_per_wave, papers_per_job)
     print(json.dumps(matrix))

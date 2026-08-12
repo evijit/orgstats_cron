@@ -62,8 +62,16 @@ def merge_citation_batches(output_file='citations_merged.parquet'):
     return df_merged
 
 if __name__ == '__main__':
+    import sys
+
     df = merge_citation_batches()
-    
+
+    if df is None:
+        # Downstream steps read citations_merged.parquet unconditionally, so fail
+        # here with a clear message rather than a FileNotFoundError later.
+        log_progress("❌ No citation batches to merge - failing the step.")
+        sys.exit(1)
+
     if df is not None:
         log_progress("\n✅ Citation merge complete!")
         

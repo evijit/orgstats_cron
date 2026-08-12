@@ -19,13 +19,61 @@ from config_papers import (
     MAX_PAPERS_FOR_CITATIONS,
     MULTI_CLASS_ENABLED,
     MULTI_CLASS_SCORE_THRESHOLD,
-    MAX_CLASSIFICATIONS
+    MAX_CLASSIFICATIONS,
+    SEMANTIC_SCHOLAR_KEY,
+    SS_MIN_REQUEST_INTERVAL,
+    SS_REQUEST_TIMEOUT,
+    SS_ID_LOOKUP_TIMEOUT,
+    SS_SEARCH_TIMEOUT,
+    CITATION_JOB_CONCURRENCY
 )
 
 # Global variables for loaded resources
 _nlp = None
 _taxonomy_embeddings = None
 _comprehensive_taxonomy = None
+
+# Semantic Scholar client, created once per process. A fresh client per paper would
+# throw away the connection pool and any throttling state.
+_ss_client = None
+_ss_last_request_time = None
+
+
+def get_semantic_scholar_client():
+    """Return the shared Semantic Scholar client, authenticated if a key is set."""
+    global _ss_client
+    if _ss_client is None:
+        from semanticscholar import SemanticScholar
+
+        kwargs = {'timeout': SS_REQUEST_TIMEOUT}
+        if SEMANTIC_SCHOLAR_KEY:
+            kwargs['api_key'] = SEMANTIC_SCHOLAR_KEY
+            log_progress(f"🔑 Semantic Scholar: using API key, pacing requests "
+                         f"{SS_MIN_REQUEST_INTERVAL:.2f}s apart "
+                         f"({CITATION_JOB_CONCURRENCY} parallel job(s) sharing 1 req/s)")
+        else:
+            log_progress("⚠️  Semantic Scholar: no API key found (set SEMANTIC_SCHOLAR_KEY); "
+                         "falling back to the shared unauthenticated limit")
+        _ss_client = SemanticScholar(**kwargs)
+    return _ss_client
+
+
+def throttle_semantic_scholar_request():
+    """
+    Space out requests to stay under the key's cumulative 1 req/s ceiling.
+
+    The limit is global, so each parallel job gets only its share of it. Jobs can't
+    coordinate, so this keeps the *expected* aggregate rate under the ceiling; the
+    package's own 429 retry absorbs the occasional collision.
+    """
+    global _ss_last_request_time
+    if SS_MIN_REQUEST_INTERVAL <= 0:
+        return
+    if _ss_last_request_time is not None:
+        wait = SS_MIN_REQUEST_INTERVAL - (time.monotonic() - _ss_last_request_time)
+        if wait > 0:
+            time.sleep(wait)
+    _ss_last_request_time = time.monotonic()
 
 def load_spacy_model():
     """Load spaCy model with automatic download if needed."""
@@ -341,31 +389,31 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
         fetch_date is in YYYY-MM-DD format for successful fetches
     """
     try:
-        from semanticscholar import SemanticScholar
         from semanticscholar.SemanticScholarException import ObjectNotFoundException
         import signal
         from datetime import datetime
-        
+
         # Timeout handler
         class TimeoutException(Exception):
             pass
-        
+
         def timeout_handler(signum, frame):
             raise TimeoutException()
-        
-        sch = SemanticScholar()
-        
+
+        sch = get_semantic_scholar_client()
+
         # OPTIMIZATION: If we have Semantic Scholar ID, fetch directly (much faster!)
         if semantic_scholar_id and isinstance(semantic_scholar_id, str) and semantic_scholar_id.strip():
             try:
                 if log_details:
                     log_progress(f"🔍 Fetching by ID: {semantic_scholar_id[:20]}...")
                 
-                # Set timeout to 30 seconds (ID lookup is faster than search)
+                # Guard the whole lookup, leaving room for one 429 retry inside it
                 signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(30)
-                
+                signal.alarm(SS_ID_LOOKUP_TIMEOUT)
+
                 try:
+                    throttle_semantic_scholar_request()
                     paper = sch.get_paper(semantic_scholar_id)
                     
                     # Cancel the alarm
@@ -387,7 +435,7 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
                 except TimeoutException:
                     signal.alarm(0)
                     if log_details:
-                        log_progress(f"   ⚠️  Timeout fetching by ID (30s)")
+                        log_progress(f"   ⚠️  Timeout fetching by ID ({SS_ID_LOOKUP_TIMEOUT}s)")
                 except ObjectNotFoundException:
                     signal.alarm(0)
                     if log_details:
@@ -408,11 +456,12 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
                     display_title = query[:80] + "..." if len(query) > 80 else query
                     log_progress(f"🔍 Searching: {display_title}")
                 
-                # Set timeout to 90 seconds (same as before)
+                # Guard the whole search, leaving room for a 429 retry inside it
                 signal.signal(signal.SIGALRM, timeout_handler)
-                signal.alarm(90)
-                
+                signal.alarm(SS_SEARCH_TIMEOUT)
+
                 try:
+                    throttle_semantic_scholar_request()
                     results = sch.search_paper(query, limit=1)
                     
                     # Cancel the alarm
@@ -438,7 +487,7 @@ def get_paper_citations(paper_id, paper_title=None, paper_authors=None, log_deta
                 except TimeoutException:
                     signal.alarm(0)
                     if log_details:
-                        log_progress(f"   ⚠️  Timeout (90s)")
+                        log_progress(f"   ⚠️  Timeout ({SS_SEARCH_TIMEOUT}s)")
                 except ObjectNotFoundException:
                     signal.alarm(0)
                     if log_details:

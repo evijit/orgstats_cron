@@ -5,6 +5,16 @@ on:
     - cron: '0 2 * * *'  # Run at 2 AM UTC daily
   workflow_dispatch:
 
+env:
+  # Papers fan-out geometry. Keep in sync with the values passed to
+  # calculate_waves.py / generate_matrix_wave.py below.
+  PAPERS_PER_JOB: '200'
+  JOBS_PER_WAVE: '15'
+  # Number of wave job pairs actually declared in this file. If the paper count
+  # grows past PAPERS_PER_JOB * JOBS_PER_WAVE * MAX_DECLARED_WAVES, the setup job
+  # emits a warning telling you to add another wave block.
+  MAX_DECLARED_WAVES: '6'
+
 jobs:
   update-models-data:
     name: "Update Daily Models Data"
@@ -12,10 +22,10 @@ jobs:
     timeout-minutes: 90
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v7
       with:
         python-version: '3.10'
 
@@ -60,10 +70,10 @@ jobs:
     timeout-minutes: 60
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v7
       with:
         python-version: '3.10'
 
@@ -103,18 +113,23 @@ jobs:
           --repo-type dataset --commit-message "Automated datasets data update"
 
   # Papers - Dynamic Wave Processing
+  #
+  # The papers parquet is downloaded from HuggingFace exactly ONCE here and passed
+  # to every wave job as an artifact. Previously all 60+ jobs fetched it directly,
+  # which triggered HTTP 429 rate limiting that no retry ladder could survive.
   papers-setup:
-    name: "Papers - Calculate Waves"
+    name: "Papers - Fetch Snapshot & Calculate Waves"
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     outputs:
       total_papers: ${{ steps.count.outputs.total_papers }}
       num_waves: ${{ steps.count.outputs.num_waves }}
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v7
       with:
         python-version: '3.10'
 
@@ -123,31 +138,60 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: Count papers and calculate waves
+    - name: Fetch papers snapshot and calculate waves
       id: count
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
       run: |
-        PAPER_COUNT=$(python -c "from data_fetcher_papers import fetch_raw_data; df, _ = fetch_raw_data(); print(len(df))" 2>&1 | tail -1)
-        NUM_WAVES=$(python calculate_waves.py $PAPER_COUNT 200 15)
+        set -euo pipefail
+
+        # Fetches once, writes papers_raw.parquet + papers_count.txt (and best-effort
+        # previous_citations.parquet for the batch cache). Full output stays visible
+        # in the log instead of being swallowed by a pipe.
+        python -u fetch_papers_snapshot.py
+
+        PAPER_COUNT=$(tr -d '[:space:]' < papers_count.txt)
+        if ! [[ "$PAPER_COUNT" =~ ^[0-9]+$ ]] || [ "$PAPER_COUNT" -lt 1 ]; then
+          echo "::error::Invalid paper count from snapshot: '$PAPER_COUNT'"
+          exit 1
+        fi
+
+        NUM_WAVES=$(python calculate_waves.py "$PAPER_COUNT" "$PAPERS_PER_JOB" "$JOBS_PER_WAVE")
         echo "Total papers: $PAPER_COUNT"
         echo "Number of waves needed: $NUM_WAVES"
+
+        if [ "$NUM_WAVES" -gt "$MAX_DECLARED_WAVES" ]; then
+          COVERED=$((MAX_DECLARED_WAVES * JOBS_PER_WAVE * PAPERS_PER_JOB))
+          echo "::warning::Paper count $PAPER_COUNT needs $NUM_WAVES waves but only $MAX_DECLARED_WAVES are declared. Papers past the first $COVERED (lowest-upvoted) get no citations - add another wave block."
+        fi
+
         echo "total_papers=$PAPER_COUNT" >> $GITHUB_OUTPUT
         echo "num_waves=$NUM_WAVES" >> $GITHUB_OUTPUT
+
+    - name: Upload papers snapshot for wave jobs
+      uses: actions/upload-artifact@v7
+      with:
+        name: papers-raw-snapshot
+        path: |
+          papers_raw.parquet
+          papers_raw_meta.json
+          previous_citations.parquet
+        if-no-files-found: error
+        retention-days: 1
 
   # Papers Wave 0
   papers-wave-0-setup:
     name: "Papers Wave 0 - Setup"
-    needs: papers-setup
+    needs: [papers-setup]
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.split.outputs.matrix }}
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v7
       with:
         python-version: '3.10'
 
@@ -159,16 +203,18 @@ jobs:
     - name: Calculate Wave 0 jobs
       id: split
       run: |
+        set -euo pipefail
         PAPER_COUNT=${{ needs.papers-setup.outputs.total_papers }}
-        MATRIX=$(python generate_matrix_wave.py $PAPER_COUNT 0 15)
+        MATRIX=$(python generate_matrix_wave.py "$PAPER_COUNT" 0 "$JOBS_PER_WAVE" "$PAPERS_PER_JOB")
         echo "Wave 0 Matrix: $MATRIX"
         echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 
   papers-wave-0-fetch:
     name: "Papers Wave 0 - Job ${{ matrix.job_id }}"
     needs: papers-wave-0-setup
+    if: needs.papers-wave-0-setup.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 350
     strategy:
       matrix:
         include: ${{ fromJson(needs.papers-wave-0-setup.outputs.matrix) }}
@@ -176,10 +222,10 @@ jobs:
       max-parallel: 15
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v7
       with:
         python-version: '3.10'
 
@@ -188,34 +234,48 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    - name: Download papers snapshot
+      uses: actions/download-artifact@v8
+      with:
+        name: papers-raw-snapshot
+
     - name: Fetch citations for batch
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
         HF_STARTUP_JITTER: '1'
+        SEMANTIC_SCHOLAR_KEY: ${{ secrets.SEMANTIC_SCHOLAR_KEY }}
+        # The key's 1 req/s limit is cumulative across every job, so each job paces
+        # itself to 1/max-parallel of it.
+        CITATION_JOB_CONCURRENCY: '15'
       run: |
-        python fetch_citations_batch.py ${{ matrix.start_idx }} ${{ matrix.end_idx }}
+        python -u fetch_citations_batch.py ${{ matrix.start_idx }} ${{ matrix.end_idx }}
 
     - name: Upload batch artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: citations-wave-0-batch-${{ matrix.job_id }}
         path: citations_batch_*.parquet
+        if-no-files-found: error
         retention-days: 7
 
   # Papers Wave 1
   papers-wave-1-setup:
     name: "Papers Wave 1 - Setup"
     needs: [papers-setup, papers-wave-0-fetch]
-    if: needs.papers-setup.outputs.num_waves >= 2
+    if: |
+      always() &&
+      needs.papers-setup.result == 'success' &&
+      needs.papers-setup.outputs.num_waves >= 2 &&
+      needs.papers-wave-0-fetch.result != 'cancelled'
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.split.outputs.matrix }}
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v7
       with:
         python-version: '3.10'
 
@@ -227,8 +287,9 @@ jobs:
     - name: Calculate Wave 1 jobs
       id: split
       run: |
+        set -euo pipefail
         PAPER_COUNT=${{ needs.papers-setup.outputs.total_papers }}
-        MATRIX=$(python generate_matrix_wave.py $PAPER_COUNT 1 15)
+        MATRIX=$(python generate_matrix_wave.py "$PAPER_COUNT" 1 "$JOBS_PER_WAVE" "$PAPERS_PER_JOB")
         echo "Wave 1 Matrix: $MATRIX"
         echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 
@@ -237,7 +298,7 @@ jobs:
     needs: papers-wave-1-setup
     if: needs.papers-wave-1-setup.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 350
     strategy:
       matrix:
         include: ${{ fromJson(needs.papers-wave-1-setup.outputs.matrix) }}
@@ -245,10 +306,10 @@ jobs:
       max-parallel: 15
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v7
       with:
         python-version: '3.10'
 
@@ -257,18 +318,28 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    - name: Download papers snapshot
+      uses: actions/download-artifact@v8
+      with:
+        name: papers-raw-snapshot
+
     - name: Fetch citations for batch
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
         HF_STARTUP_JITTER: '1'
+        SEMANTIC_SCHOLAR_KEY: ${{ secrets.SEMANTIC_SCHOLAR_KEY }}
+        # The key's 1 req/s limit is cumulative across every job, so each job paces
+        # itself to 1/max-parallel of it.
+        CITATION_JOB_CONCURRENCY: '15'
       run: |
-        python fetch_citations_batch.py ${{ matrix.start_idx }} ${{ matrix.end_idx }}
+        python -u fetch_citations_batch.py ${{ matrix.start_idx }} ${{ matrix.end_idx }}
 
     - name: Upload batch artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: citations-wave-1-batch-${{ matrix.job_id }}
         path: citations_batch_*.parquet
+        if-no-files-found: error
         retention-days: 7
 
   # Papers Wave 2
@@ -276,18 +347,19 @@ jobs:
     name: "Papers Wave 2 - Setup"
     needs: [papers-setup, papers-wave-1-fetch]
     if: |
-      always() && 
+      always() &&
+      needs.papers-setup.result == 'success' &&
       needs.papers-setup.outputs.num_waves >= 3 &&
-      (needs.papers-wave-1-fetch.result == 'success' || needs.papers-wave-1-fetch.result == 'skipped')
+      needs.papers-wave-1-fetch.result != 'cancelled'
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.split.outputs.matrix }}
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v7
       with:
         python-version: '3.10'
 
@@ -299,8 +371,9 @@ jobs:
     - name: Calculate Wave 2 jobs
       id: split
       run: |
+        set -euo pipefail
         PAPER_COUNT=${{ needs.papers-setup.outputs.total_papers }}
-        MATRIX=$(python generate_matrix_wave.py $PAPER_COUNT 2 15)
+        MATRIX=$(python generate_matrix_wave.py "$PAPER_COUNT" 2 "$JOBS_PER_WAVE" "$PAPERS_PER_JOB")
         echo "Wave 2 Matrix: $MATRIX"
         echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 
@@ -309,7 +382,7 @@ jobs:
     needs: papers-wave-2-setup
     if: needs.papers-wave-2-setup.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 350
     strategy:
       matrix:
         include: ${{ fromJson(needs.papers-wave-2-setup.outputs.matrix) }}
@@ -317,10 +390,10 @@ jobs:
       max-parallel: 15
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v7
       with:
         python-version: '3.10'
 
@@ -329,18 +402,28 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    - name: Download papers snapshot
+      uses: actions/download-artifact@v8
+      with:
+        name: papers-raw-snapshot
+
     - name: Fetch citations for batch
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
         HF_STARTUP_JITTER: '1'
+        SEMANTIC_SCHOLAR_KEY: ${{ secrets.SEMANTIC_SCHOLAR_KEY }}
+        # The key's 1 req/s limit is cumulative across every job, so each job paces
+        # itself to 1/max-parallel of it.
+        CITATION_JOB_CONCURRENCY: '15'
       run: |
-        python fetch_citations_batch.py ${{ matrix.start_idx }} ${{ matrix.end_idx }}
+        python -u fetch_citations_batch.py ${{ matrix.start_idx }} ${{ matrix.end_idx }}
 
     - name: Upload batch artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: citations-wave-2-batch-${{ matrix.job_id }}
         path: citations_batch_*.parquet
+        if-no-files-found: error
         retention-days: 7
 
   # Papers Wave 3
@@ -348,18 +431,19 @@ jobs:
     name: "Papers Wave 3 - Setup"
     needs: [papers-setup, papers-wave-2-fetch]
     if: |
-      always() && 
+      always() &&
+      needs.papers-setup.result == 'success' &&
       needs.papers-setup.outputs.num_waves >= 4 &&
-      (needs.papers-wave-2-fetch.result == 'success' || needs.papers-wave-2-fetch.result == 'skipped')
+      needs.papers-wave-2-fetch.result != 'cancelled'
     runs-on: ubuntu-latest
     outputs:
       matrix: ${{ steps.split.outputs.matrix }}
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v7
       with:
         python-version: '3.10'
 
@@ -371,8 +455,9 @@ jobs:
     - name: Calculate Wave 3 jobs
       id: split
       run: |
+        set -euo pipefail
         PAPER_COUNT=${{ needs.papers-setup.outputs.total_papers }}
-        MATRIX=$(python generate_matrix_wave.py $PAPER_COUNT 3 15)
+        MATRIX=$(python generate_matrix_wave.py "$PAPER_COUNT" 3 "$JOBS_PER_WAVE" "$PAPERS_PER_JOB")
         echo "Wave 3 Matrix: $MATRIX"
         echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
 
@@ -381,7 +466,7 @@ jobs:
     needs: papers-wave-3-setup
     if: needs.papers-wave-3-setup.result == 'success'
     runs-on: ubuntu-latest
-    timeout-minutes: 360
+    timeout-minutes: 350
     strategy:
       matrix:
         include: ${{ fromJson(needs.papers-wave-3-setup.outputs.matrix) }}
@@ -389,10 +474,10 @@ jobs:
       max-parallel: 15
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v7
       with:
         python-version: '3.10'
 
@@ -401,33 +486,215 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
+    - name: Download papers snapshot
+      uses: actions/download-artifact@v8
+      with:
+        name: papers-raw-snapshot
+
     - name: Fetch citations for batch
       env:
         HF_TOKEN: ${{ secrets.HF_TOKEN }}
         HF_STARTUP_JITTER: '1'
+        SEMANTIC_SCHOLAR_KEY: ${{ secrets.SEMANTIC_SCHOLAR_KEY }}
+        # The key's 1 req/s limit is cumulative across every job, so each job paces
+        # itself to 1/max-parallel of it.
+        CITATION_JOB_CONCURRENCY: '15'
       run: |
-        python fetch_citations_batch.py ${{ matrix.start_idx }} ${{ matrix.end_idx }}
+        python -u fetch_citations_batch.py ${{ matrix.start_idx }} ${{ matrix.end_idx }}
 
     - name: Upload batch artifact
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: citations-wave-3-batch-${{ matrix.job_id }}
         path: citations_batch_*.parquet
+        if-no-files-found: error
+        retention-days: 7
+
+  # Papers Wave 4
+  papers-wave-4-setup:
+    name: "Papers Wave 4 - Setup"
+    needs: [papers-setup, papers-wave-3-fetch]
+    if: |
+      always() &&
+      needs.papers-setup.result == 'success' &&
+      needs.papers-setup.outputs.num_waves >= 5 &&
+      needs.papers-wave-3-fetch.result != 'cancelled'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.split.outputs.matrix }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v7
+
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Calculate Wave 4 jobs
+      id: split
+      run: |
+        set -euo pipefail
+        PAPER_COUNT=${{ needs.papers-setup.outputs.total_papers }}
+        MATRIX=$(python generate_matrix_wave.py "$PAPER_COUNT" 4 "$JOBS_PER_WAVE" "$PAPERS_PER_JOB")
+        echo "Wave 4 Matrix: $MATRIX"
+        echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
+  papers-wave-4-fetch:
+    name: "Papers Wave 4 - Job ${{ matrix.job_id }}"
+    needs: papers-wave-4-setup
+    if: needs.papers-wave-4-setup.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.papers-wave-4-setup.outputs.matrix) }}
+      fail-fast: false
+      max-parallel: 15
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v7
+
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Download papers snapshot
+      uses: actions/download-artifact@v8
+      with:
+        name: papers-raw-snapshot
+
+    - name: Fetch citations for batch
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        HF_STARTUP_JITTER: '1'
+        SEMANTIC_SCHOLAR_KEY: ${{ secrets.SEMANTIC_SCHOLAR_KEY }}
+        # The key's 1 req/s limit is cumulative across every job, so each job paces
+        # itself to 1/max-parallel of it.
+        CITATION_JOB_CONCURRENCY: '15'
+      run: |
+        python -u fetch_citations_batch.py ${{ matrix.start_idx }} ${{ matrix.end_idx }}
+
+    - name: Upload batch artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: citations-wave-4-batch-${{ matrix.job_id }}
+        path: citations_batch_*.parquet
+        if-no-files-found: error
+        retention-days: 7
+
+  # Papers Wave 5
+  papers-wave-5-setup:
+    name: "Papers Wave 5 - Setup"
+    needs: [papers-setup, papers-wave-4-fetch]
+    if: |
+      always() &&
+      needs.papers-setup.result == 'success' &&
+      needs.papers-setup.outputs.num_waves >= 6 &&
+      needs.papers-wave-4-fetch.result != 'cancelled'
+    runs-on: ubuntu-latest
+    outputs:
+      matrix: ${{ steps.split.outputs.matrix }}
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v7
+
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Calculate Wave 5 jobs
+      id: split
+      run: |
+        set -euo pipefail
+        PAPER_COUNT=${{ needs.papers-setup.outputs.total_papers }}
+        MATRIX=$(python generate_matrix_wave.py "$PAPER_COUNT" 5 "$JOBS_PER_WAVE" "$PAPERS_PER_JOB")
+        echo "Wave 5 Matrix: $MATRIX"
+        echo "matrix=$MATRIX" >> $GITHUB_OUTPUT
+
+  papers-wave-5-fetch:
+    name: "Papers Wave 5 - Job ${{ matrix.job_id }}"
+    needs: papers-wave-5-setup
+    if: needs.papers-wave-5-setup.result == 'success'
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    strategy:
+      matrix:
+        include: ${{ fromJson(needs.papers-wave-5-setup.outputs.matrix) }}
+      fail-fast: false
+      max-parallel: 15
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v7
+
+    - name: Set up Python
+      uses: actions/setup-python@v7
+      with:
+        python-version: '3.10'
+
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: Download papers snapshot
+      uses: actions/download-artifact@v8
+      with:
+        name: papers-raw-snapshot
+
+    - name: Fetch citations for batch
+      env:
+        HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        HF_STARTUP_JITTER: '1'
+        SEMANTIC_SCHOLAR_KEY: ${{ secrets.SEMANTIC_SCHOLAR_KEY }}
+        # The key's 1 req/s limit is cumulative across every job, so each job paces
+        # itself to 1/max-parallel of it.
+        CITATION_JOB_CONCURRENCY: '15'
+      run: |
+        python -u fetch_citations_batch.py ${{ matrix.start_idx }} ${{ matrix.end_idx }}
+
+    - name: Upload batch artifact
+      uses: actions/upload-artifact@v7
+      with:
+        name: citations-wave-5-batch-${{ matrix.job_id }}
+        path: citations_batch_*.parquet
+        if-no-files-found: error
         retention-days: 7
 
   # Merge all waves and process papers with taxonomy
   papers-merge-and-process:
     name: "Papers - Merge All Citations & Process"
-    needs: [papers-setup, papers-wave-0-fetch, papers-wave-1-fetch, papers-wave-2-fetch, papers-wave-3-fetch]
-    if: always() && needs.papers-wave-0-fetch.result == 'success'
+    needs: [papers-setup, papers-wave-0-fetch, papers-wave-1-fetch, papers-wave-2-fetch, papers-wave-3-fetch, papers-wave-4-fetch, papers-wave-5-fetch]
+    if: |
+      always() &&
+      needs.papers-setup.result == 'success' &&
+      needs.papers-wave-0-fetch.result != 'skipped' &&
+      needs.papers-wave-0-fetch.result != 'cancelled'
     runs-on: ubuntu-latest
     timeout-minutes: 60
     steps:
     - name: Checkout repository
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
 
     - name: Set up Python
-      uses: actions/setup-python@v4
+      uses: actions/setup-python@v7
       with:
         python-version: '3.10'
 
@@ -440,8 +707,13 @@ jobs:
       run: |
         python -m spacy download en_core_web_lg
 
+    - name: Download papers snapshot
+      uses: actions/download-artifact@v8
+      with:
+        name: papers-raw-snapshot
+
     - name: Download all citation artifacts from all waves
-      uses: actions/download-artifact@v4
+      uses: actions/download-artifact@v8
       with:
         pattern: citations-wave-*
         merge-multiple: true
@@ -483,12 +755,12 @@ jobs:
           papers_with_semantic_taxonomy.parquet \
           papers_with_semantic_taxonomy.parquet \
           --repo-type dataset --commit-message "Automated papers update with citations (all waves)"
-        
+
         hf upload evijit/paperverse_daily_data \
           taxonomy_report.txt \
           taxonomy_report.txt \
           --repo-type dataset --commit-message "Automated papers update with citations (all waves)"
-        
+
         hf upload evijit/paperverse_daily_data \
           taxonomy_distribution.json \
           taxonomy_distribution.json \
