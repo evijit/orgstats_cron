@@ -1,0 +1,22 @@
+# Python bytecode
+__pycache__/
+*.py[cod]
+
+# OS / editor
+.DS_Store
+.vscode/
+
+# Pipeline artifacts, produced by runs rather than committed.
+# integrated_ml_taxonomy.json is deliberately NOT here - it is a source input.
+papers_raw.parquet
+papers_raw_meta.json
+papers_count.txt
+previous_citations.parquet
+citations_batch_*.parquet
+citations_merged.parquet
+models_processed.parquet
+datasets_processed.parquet
+papers_with_semantic_taxonomy.parquet
+papers_with_semantic_taxonomy.csv
+taxonomy_report.txt
+taxonomy_distribution.json
